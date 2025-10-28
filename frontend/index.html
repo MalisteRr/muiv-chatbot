@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>МУИВ - Московский университет имени С.Ю. Витте</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        /* ШАПКА САЙТА */
+        .header {
+            background: linear-gradient(135deg, #c41e3a 0%, #8B0000 100%);
+            color: white;
+            padding: 20px 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header-logo h1 {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .header-logo p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .header-contacts {
+            text-align: right;
+        }
+
+        .header-contacts p {
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        /* КОНТЕНТ */
+        .content {
+            max-width: 1200px;
+            margin: 60px auto;
+            padding: 0 40px;
+        }
+
+        .welcome-section {
+            background: white;
+            padding: 60px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .welcome-section h2 {
+            font-size: 36px;
+            color: #c41e3a;
+            margin-bottom: 20px;
+        }
+
+        .welcome-section p {
+            font-size: 18px;
+            color: #555;
+            line-height: 1.8;
+            margin-bottom: 30px;
+        }
+
+        .cta-button {
+            background: #c41e3a;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(196, 30, 58, 0.3);
+        }
+
+        .cta-button:hover {
+            background: #8B0000;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(196, 30, 58, 0.4);
+        }
+
+        /* КНОПКА ЧАТА */
+        .chat-button {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #c41e3a 0%, #8B0000 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            font-size: 32px;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(196, 30, 58, 0.4);
+            transition: all 0.3s;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 30px rgba(196, 30, 58, 0.6);
+        }
+
+        .chat-button.active {
+            background: #555;
+        }
+
+        /* ВСПЛЫВАЮЩЕЕ ОКНО ЧАТА */
+        .chat-popup {
+            position: fixed;
+            bottom: 120px;
+            right: 30px;
+            width: 400px;
+            height: 600px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            display: none;
+            flex-direction: column;
+            z-index: 999;
+            overflow: hidden;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        .chat-popup.active {
+            display: flex;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* ЗАГОЛОВОК ЧАТА */
+        .chat-header {
+            background: linear-gradient(135deg, #c41e3a 0%, #8B0000 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h3 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .chat-header p {
+            font-size: 12px;
+            opacity: 0.9;
+            margin: 5px 0 0 0;
+        }
+
+        .close-chat {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.3s;
+        }
+
+        .close-chat:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* СООБЩЕНИЯ */
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f9f9f9;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.bot {
+            text-align: left;
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+
+        .message.bot .message-bubble {
+            background: white;
+            color: #333;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.user .message-bubble {
+            background: #c41e3a;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        /* ИНДИКАТОР ПЕЧАТИ */
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+        }
+
+        .typing-indicator.active {
+            display: block;
+        }
+
+        .typing-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #c41e3a;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+
+        /* ВВОД СООБЩЕНИЯ */
+        .chat-input-container {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #eee;
+        }
+
+        .quick-questions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .quick-btn {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .quick-btn:hover {
+            background: #c41e3a;
+            color: white;
+            border-color: #c41e3a;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .chat-input:focus {
+            border-color: #c41e3a;
+        }
+
+        .send-button {
+            background: #c41e3a;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        .send-button:hover {
+            background: #8B0000;
+        }
+
+        /* АДАПТИВНОСТЬ */
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                text-align: center;
+                gap: 15px;
+            }
+
+            .header-contacts {
+                text-align: center;
+            }
+
+            .content {
+                padding: 0 20px;
+                margin: 30px auto;
+            }
+
+            .welcome-section {
+                padding: 30px 20px;
+            }
+
+            .chat-popup {
+                width: calc(100vw - 20px);
+                height: calc(100vh - 140px);
+                right: 10px;
+                bottom: 100px;
+            }
+
+            .chat-button {
+                bottom: 20px;
+                right: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- ШАПКА САЙТА -->
+    <div class="header">
+        <div class="header-logo">
+            <div>
+                <h1>🎓 МУИВ</h1>
+                <p>Московский университет имени С.Ю. Витте</p>
+            </div>
+        </div>
+        <div class="header-contacts">
+            <p>📞 8 (800) 550-03-63</p>
+            <p>✉️ pk@muiv.ru</p>
+            <p>🌐 www.muiv.ru</p>
+        </div>
+    </div>
+
+    <!-- КОНТЕНТ -->
+    <div class="content">
+        <div class="welcome-section">
+            <h2>Добро пожаловать в МУИВ!</h2>
+            <p>
+                Московский университет имени С.Ю. Витте — один из ведущих негосударственных вузов России с 1993 года.
+                Государственная лицензия и аккредитация. Дипломы государственного образца.
+            </p>
+            <p>
+                У вас есть вопросы о поступлении? Наш чат-бот поможет вам!
+            </p>
+            <button class="cta-button" onclick="toggleChat()">
+                💬 Задать вопрос боту
+            </button>
+        </div>
+    </div>
+
+    <!-- КНОПКА ЧАТА -->
+    <button class="chat-button" id="chatButton" onclick="toggleChat()">
+        💬
+    </button>
+
+    <!-- ВСПЛЫВАЮЩЕЕ ОКНО ЧАТА -->
+    <div class="chat-popup" id="chatPopup">
+        <div class="chat-header">
+            <div>
+                <h3>🤖 Бот-помощник МУИВ</h3>
+                <p id="connectionStatus">Демо режим</p>
+            </div>
+            <button class="close-chat" onclick="toggleChat()">×</button>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message bot">
+                <div class="message-bubble">
+                    👋 Здравствуйте! Я бот-помощник приемной комиссии МУИВ.<br><br>
+                    Задавайте любые вопросы о поступлении!
+                </div>
+            </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+            <div class="message bot">
+                <div class="message-bubble">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-container">
+            <div class="quick-questions">
+                <button class="quick-btn" onclick="sendQuickQuestion('Какие документы нужны?')">📄 Документы</button>
+                <button class="quick-btn" onclick="sendQuickQuestion('Сколько стоит обучение?')">💰 Стоимость</button>
+                <button class="quick-btn" onclick="sendQuickQuestion('Есть ли общежитие?')">🏠 Общежитие</button>
+            </div>
+            <div class="chat-input-wrapper">
+                <input type="text" class="chat-input" id="chatInput" placeholder="Введите ваш вопрос..." onkeypress="handleKeyPress(event)">
+                <button class="send-button" onclick="sendMessage()">Отправить</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatPopup = document.getElementById('chatPopup');
+        const chatButton = document.getElementById('chatButton');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const typingIndicator = document.getElementById('typingIndicator');
+
+        // НАСТРОЙКИ ПОДКЛЮЧЕНИЯ
+        const USE_WEBSOCKET = true; // Установите в true для использования WebSocket, false для демо режима
+        const WS_URL = 'ws://localhost:8000/ws/chat'; // URL вашего WebSocket сервера
+        
+        let ws = null;
+        let wsConnected = false;
+
+        // Инициализация WebSocket
+        function initWebSocket() {
+            if (!USE_WEBSOCKET) return;
+            
+            try {
+                ws = new WebSocket(WS_URL);
+                
+                ws.onopen = () => {
+                    console.log('✅ WebSocket подключен к серверу');
+                    wsConnected = true;
+                    updateConnectionStatus(true);
+                };
+                
+                ws.onmessage = (event) => {
+                    console.log('📩 Получен ответ от сервера');
+                    typingIndicator.classList.remove('active');
+                    addMessage(event.data, false);
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('❌ WebSocket ошибка:', error);
+                    wsConnected = false;
+                    updateConnectionStatus(false);
+                };
+                
+                ws.onclose = () => {
+                    console.log('🔌 WebSocket отключен');
+                    wsConnected = false;
+                    updateConnectionStatus(false);
+                    
+                    // Попытка переподключения через 5 секунд
+                    setTimeout(() => {
+                        if (USE_WEBSOCKET) {
+                            console.log('🔄 Попытка переподключения...');
+                            initWebSocket();
+                        }
+                    }, 5000);
+                };
+            } catch (error) {
+                console.error('❌ Не удалось создать WebSocket:', error);
+                wsConnected = false;
+            }
+        }
+
+        // Обновление статуса подключения
+        function updateConnectionStatus(connected) {
+            const statusText = document.getElementById('connectionStatus');
+            if (statusText) {
+                if (connected) {
+                    statusText.textContent = '🟢 Онлайн • Подключено к AI';
+                    statusText.style.color = '#4CAF50';
+                } else if (USE_WEBSOCKET) {
+                    statusText.textContent = '🔴 Оффлайн • Переподключение...';
+                    statusText.style.color = '#ff9800';
+                } else {
+                    statusText.textContent = '🎭 Демо режим';
+                    statusText.style.color = 'rgba(255, 255, 255, 0.9)';
+                }
+            }
+        }
+
+        // Открыть/закрыть чат
+        function toggleChat() {
+            chatPopup.classList.toggle('active');
+            chatButton.classList.toggle('active');
+            
+            if (chatPopup.classList.contains('active')) {
+                chatInput.focus();
+                chatButton.innerHTML = '✕';
+                
+                // Инициализировать WebSocket при открытии чата
+                if (USE_WEBSOCKET && !ws) {
+                    initWebSocket();
+                }
+            } else {
+                chatButton.innerHTML = '💬';
+            }
+        }
+
+        // Ответы бота (для демо режима)
+        const botResponses = {
+            "документы": "📄 **Документы для поступления:**\n\n• Паспорт (оригинал или копия)\n• Аттестат о среднем общем образовании или диплом СПО\n• Результаты ЕГЭ (для выпускников 11 классов)\n• СНИЛС\n• Фотографии 3x4 (6 штук)\n• Заявление о приеме\n\n✅ Подача: лично, онлайн (Госуслуги, muiv.ru), по почте\n\n📞 8 (800) 550-03-63",
+            
+            "стоимость": "💰 **Стоимость обучения:**\n\n• Очная: от 65 000 до 90 000 руб./семестр\n• Очно-заочная: от 55 000 до 75 000 руб./семестр\n• Заочная: от 35 000 до 50 000 руб./семестр\n• Дистанционная: от 30 000 руб./семестр\n\nСтоимость фиксируется на учебный год.\n\n📞 Точная цена: 8 (800) 550-03-63",
+            
+            "общежитие": "🏠 **Общежитие в МУИВ:**\n\nДа! Университет предоставляет общежитие для иногородних студентов.\n\n**Условия:**\n✅ Указать необходимость в заявлении\n✅ Быть зачисленным\n✅ Подать документы на заселение\n\nМеста ограничены.\n\n📞 +7 (495) 500-03-63\n✉️ pk@muiv.ru",
+            
+            "default": "Спасибо за ваш вопрос! 😊\n\nДля получения точной информации свяжитесь с приемной комиссией:\n\n📞 8 (800) 550-03-63 (бесплатно)\n📞 +7 (495) 500-03-63\n✉️ pk@muiv.ru\n🌐 www.muiv.ru\n\nИли задайте вопрос по-другому!"
+        };
+
+        function addMessage(text, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.innerHTML = text.replace(/\n/g, '<br>');
+            
+            messageDiv.appendChild(bubble);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function getBotResponse(userMessage) {
+            const lowerMessage = userMessage.toLowerCase();
+            
+            if (lowerMessage.includes('документ') || lowerMessage.includes('нужн')) {
+                return botResponses.документы;
+            } else if (lowerMessage.includes('стоим') || lowerMessage.includes('цена') || lowerMessage.includes('сколько')) {
+                return botResponses.стоимость;
+            } else if (lowerMessage.includes('общежит') || lowerMessage.includes('жил') || lowerMessage.includes('прожив')) {
+                return botResponses.общежитие;
+            } else {
+                return botResponses.default;
+            }
+        }
+
+        function sendMessage() {
+            const message = chatInput.value.trim();
+            
+            if (message === '') return;
+            
+            addMessage(message, true);
+            chatInput.value = '';
+            
+            typingIndicator.classList.add('active');
+            
+            // Отправка через WebSocket или демо режим
+            if (USE_WEBSOCKET && ws && wsConnected && ws.readyState === WebSocket.OPEN) {
+                console.log('📤 Отправка через WebSocket:', message);
+                try {
+                    ws.send(message);
+                } catch (error) {
+                    console.error('❌ Ошибка отправки:', error);
+                    typingIndicator.classList.remove('active');
+                    addMessage('Ошибка соединения с сервером. Попробуйте позже.', false);
+                }
+            } else {
+                // Демо режим с заглушками
+                console.log('🎭 Демо режим: используются заглушки');
+                setTimeout(() => {
+                    typingIndicator.classList.remove('active');
+                    const response = getBotResponse(message);
+                    addMessage(response, false);
+                }, 1500);
+            }
+        }
+
+        function sendQuickQuestion(question) {
+            chatInput.value = question;
+            sendMessage();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Инициализация при загрузке страницы
+        window.addEventListener('load', () => {
+            console.log('🚀 Страница загружена');
+            console.log(`📡 WebSocket режим: ${USE_WEBSOCKET ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН (Демо)'}`);
+            
+            if (USE_WEBSOCKET) {
+                console.log(`🔗 Попытка подключения к: ${WS_URL}`);
+            } else {
+                console.log('ℹ️ Для подключения к реальному боту измените USE_WEBSOCKET = true');
+            }
+        });
+
+        // Закрытие WebSocket при закрытии страницы
+        window.addEventListener('beforeunload', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>
