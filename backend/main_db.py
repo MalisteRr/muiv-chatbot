@@ -28,7 +28,7 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-r1")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:muiv2024@localhost:5432/muiv_bot")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Инициализация
 bot = Bot(token=TOKEN)
