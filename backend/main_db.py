@@ -24,8 +24,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-TOKEN = os.getenv("8198101919:AAFjUqrYN2bktrEtip01zV1e-fxd4UyN8tY")
-OPENAI_KEY = os.getenv("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")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-r1")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:muiv2024@localhost:5432/muiv_bot")
