@@ -17,8 +17,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../logs/bot.log'),
-        logging.StreamHandler()
+        # logging.FileHandler('logs/bot.log'),  # Закомментируйте эту строку
+        logging.StreamHandler()  # Только консоль
     ]
 )
 logger = logging.getLogger(__name__)
