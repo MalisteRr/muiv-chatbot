@@ -82,30 +82,31 @@ async def init_db():
 async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
     """Поиск FAQ по ключевым словам"""
     if not db_pool:
+        logger.error("БД не подключена!")
         return []
     
     try:
         async with db_pool.acquire() as conn:
-            # Полнотекстовый поиск
+            # ПРОСТОЙ поиск по LIKE вместо полнотекстового
+            search_text = " ".join(keywords)
+            
             query = """
             SELECT 
                 id,
                 question,
                 answer,
-                category,
-                ts_rank(
-                    to_tsvector('russian', question || ' ' || answer),
-                    plainto_tsquery('russian', $1)
-                ) as rank
+                category
             FROM faq
-            WHERE to_tsvector('russian', question || ' ' || answer) @@ 
-                  plainto_tsquery('russian', $1)
-            ORDER BY rank DESC
+            WHERE 
+                LOWER(question) LIKE LOWER($1) OR 
+                LOWER(answer) LIKE LOWER($1) OR
+                LOWER(category) LIKE LOWER($1)
             LIMIT $2
             """
             
-            search_text = " ".join(keywords)
-            rows = await conn.fetch(query, search_text, limit)
+            rows = await conn.fetch(query, f"%{search_text}%", limit)
+            
+            logger.info(f"Найдено {len(rows)} результатов для '{search_text}'")
             
             return [
                 {
@@ -113,12 +114,12 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
                     "question": row["question"],
                     "answer": row["answer"],
                     "category": row["category"],
-                    "rank": float(row["rank"])
+                    "rank": 1.0
                 }
                 for row in rows
             ]
     except Exception as e:
-        logger.error(f"Ошибка поиска в БД: {e}")
+        logger.error(f"Ошибка поиска: {e}", exc_info=True)
         return []
 
 
@@ -210,7 +211,7 @@ async def get_context_from_db(question: str) -> str:
     keywords = extract_keywords(question)
     
     if not keywords:
-        return "Релевантной информации не найдено."
+        keywords = [question]  # Используем весь вопрос как ключевое слово
     
     results = await search_faq_by_keywords(keywords, limit=3)
     
