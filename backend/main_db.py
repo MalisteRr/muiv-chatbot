@@ -17,8 +17,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        # logging.FileHandler('logs/bot.log'),  # Закоммичено.
-        logging.StreamHandler()  # Только консоль
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -46,17 +45,24 @@ db_pool = None
 # История диалогов
 chat_history = {}
 
-# System Prompt
-SYSTEM_PROMPT = """Ты - бот приемной комиссии МУИВ.
+# System Prompt (улучшенный)
+SYSTEM_PROMPT = """Ты - дружелюбный помощник приемной комиссии МУИВ.
 
-ПРАВИЛА:
-- Обращайся на "вы", кратко (2-3 абзаца)
-- Используй ТОЛЬКО информацию из контекста
-- Если нет инфо - дай контакты: 8 (800) 550-03-63
-- Emoji умеренно (📚 🎓 💰)
+СТИЛЬ ОБЩЕНИЯ:
+- Обращайся на "вы"
+- Пиши кратко и по делу (2-3 абзаца)
+- Будь естественным и доброжелательным
+- Используй emoji умеренно: 📚 🎓 💰 📞 ✉️
 
-КОНТАКТЫ:
-📞 8 (800) 550-03-63
+ВАЖНО:
+- Отвечай ТОЛЬКО на основе предоставленной информации
+- Если нет точного ответа - скажи честно и дай контакты
+- НЕ придумывай факты и цифры
+- Всегда указывай телефон для уточнений: 8 (800) 550-03-63
+
+КОНТАКТЫ МУИВ:
+📞 8 (800) 550-03-63 (бесплатно)
+☎️ +7 (495) 500-03-63
 ✉️ pk@muiv.ru
 🌐 muiv.ru"""
 
@@ -87,20 +93,25 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
     
     try:
         async with db_pool.acquire() as conn:
-            # ПРОСТОЙ поиск по LIKE вместо полнотекстового
-            search_text = " ".join(keywords)
+            search_text = " ".join(keywords).lower()
             
             query = """
             SELECT 
                 id,
                 question,
                 answer,
-                category
+                category,
+                keywords
             FROM faq
             WHERE 
-                LOWER(question) LIKE LOWER($1) OR 
-                LOWER(answer) LIKE LOWER($1) OR
-                LOWER(category) LIKE LOWER($1)
+                LOWER(question) LIKE $1 OR 
+                LOWER(answer) LIKE $1 OR
+                LOWER(category) LIKE $1 OR
+                EXISTS (
+                    SELECT 1 FROM unnest(keywords) kw 
+                    WHERE LOWER(kw) LIKE $1
+                )
+            ORDER BY priority DESC, created_at DESC
             LIMIT $2
             """
             
@@ -113,8 +124,7 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
                     "id": row["id"],
                     "question": row["question"],
                     "answer": row["answer"],
-                    "category": row["category"],
-                    "rank": 1.0
+                    "category": row["category"]
                 }
                 for row in rows
             ]
@@ -131,14 +141,19 @@ async def get_faq_by_category(category: str) -> list:
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT question, answer 
+                SELECT question, answer, category
                 FROM faq 
                 WHERE category ILIKE $1
+                ORDER BY priority DESC, created_at DESC
                 LIMIT 5
             """, f"%{category}%")
             
             return [
-                {"question": row["question"], "answer": row["answer"]}
+                {
+                    "question": row["question"], 
+                    "answer": row["answer"],
+                    "category": row["category"]
+                }
                 for row in rows
             ]
     except Exception as e:
@@ -199,43 +214,61 @@ def extract_keywords(text: str) -> list:
     text_lower = text.lower()
     
     # Стоп-слова
-    stop_words = {"как", "что", "где", "когда", "почему", "какой", "есть", "ли", 
-                  "можно", "нужно", "это", "то", "в", "на", "с", "у", "по", "для"}
+    stop_words = {"как", "что", "где", "когда", "почему", "какой", "какая", "какие",
+                  "есть", "ли", "можно", "нужно", "это", "то", "в", "на", "с", "у", 
+                  "по", "для", "или", "и", "а", "но", "же", "бы", "ли"}
     
-    words = [w for w in text_lower.split() if len(w) > 3 and w not in stop_words]
+    words = [w for w in text_lower.split() if len(w) > 2 and w not in stop_words]
     return words[:5]
 
 
-async def get_context_from_db(question: str) -> str:
-    """Получить контекст из БД"""
+async def get_context_from_db(question: str) -> tuple[str, bool]:
+    """
+    Получить контекст из БД
+    Возвращает: (контекст, найдено_ли)
+    """
     keywords = extract_keywords(question)
     
     if not keywords:
-        keywords = [question]  # Используем весь вопрос как ключевое слово
+        keywords = [question]
     
     results = await search_faq_by_keywords(keywords, limit=3)
     
     if not results:
-        return "Релевантной информации не найдено."
+        return ("", False)
     
+    # Формируем контекст в естественном виде
     context_parts = []
     for r in results:
-        context_parts.append(f"Вопрос: {r['question']}\nОтвет: {r['answer']}\n---")
+        # Убираем технические фразы - делаем естественный контекст
+        context_parts.append(f"Вопрос: {r['question']}\nОтвет: {r['answer']}")
     
-    return "\n\n".join(context_parts)
+    context = "\n\n".join(context_parts)
+    return (context, True)
 
 
 async def get_ai_response(user_id: int, question: str) -> str:
     """Получить ответ от AI с контекстом из БД"""
     try:
         # Получить контекст из БД
-        context = await get_context_from_db(question)
-        found_answer = context != "Релевантной информации не найдено."
+        context, found = await get_context_from_db(question)
         
         # Логирование
-        await log_analytics(user_id, question, found_answer)
+        await log_analytics(user_id, question, found)
         
-        # История
+        # Если ничего не найдено
+        if not found:
+            logger.info(f"Информация не найдена для вопроса: {question}")
+            return """К сожалению, я не нашел точной информации по вашему вопросу в базе знаний.
+
+Пожалуйста, обратитесь напрямую в приемную комиссию:
+📞 8 (800) 550-03-63 (бесплатно по России)
+☎️ +7 (495) 500-03-63
+✉️ pk@muiv.ru
+
+Наши специалисты помогут вам с любым вопросом! 😊"""
+        
+        # История диалога
         history = chat_history.get(user_id, [])[-4:]
         
         messages = [
@@ -243,7 +276,15 @@ async def get_ai_response(user_id: int, question: str) -> str:
         ]
         messages.extend(history)
         
-        user_message = f"Контекст из базы знаний:\n{context}\n\nВопрос: {question}"
+        # ВАЖНО: Убираем техническую фразу "Контекст из базы знаний"
+        user_message = f"""Информация из базы данных университета:
+
+{context}
+
+Вопрос пользователя: {question}
+
+Ответь на вопрос, используя эту информацию. Будь естественным и дружелюбным."""
+
         messages.append({"role": "user", "content": user_message})
         
         # Запрос к AI
@@ -270,7 +311,11 @@ async def get_ai_response(user_id: int, question: str) -> str:
         
     except Exception as e:
         logger.error(f"Ошибка генерации ответа: {e}")
-        return "😔 Техническая ошибка. Свяжитесь: 8 (800) 550-03-63"
+        return """😔 Извините, произошла техническая ошибка.
+
+Пожалуйста, свяжитесь с нами:
+📞 8 (800) 550-03-63
+✉️ pk@muiv.ru"""
 
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
@@ -306,12 +351,21 @@ async def cmd_help(message: Message):
 **Команды:**
 /start - Начать заново
 /help - Справка
+/clear - Очистить историю
 /stats - Статистика бота
 
 📞 8 (800) 550-03-63
 ✉️ pk@muiv.ru"""
     
     await message.answer(help_text, parse_mode="Markdown")
+
+
+@dp.message(Command("clear"))
+async def cmd_clear(message: Message):
+    user_id = message.from_user.id
+    if user_id in chat_history:
+        del chat_history[user_id]
+    await message.answer("✅ История диалога очищена!")
 
 
 @dp.message(Command("stats"))
@@ -331,7 +385,7 @@ async def cmd_stats(message: Message):
 📝 Вопросов в базе: {total_faq}
 💬 Всего диалогов: {total_chats}
 
-🗄️ База данных: PostgreSQL 18.0
+🗄️ База данных: PostgreSQL
 🤖 Модель: {MODEL}"""
             
             await message.answer(stats, parse_mode="Markdown")
@@ -339,35 +393,44 @@ async def cmd_stats(message: Message):
         logger.error(f"Ошибка статистики: {e}")
 
 
-# Обработчики кнопок
+# ========== ОБРАБОТЧИКИ КНОПОК И ТЕКСТА ==========
+
+# ЕДИНАЯ ФУНКЦИЯ для обработки кнопок и текстовых вопросов
+async def handle_question(message: Message, category_hint: str = None):
+    """
+    Универсальный обработчик вопросов
+    category_hint - подсказка категории для кнопок
+    """
+    user_id = message.from_user.id
+    user_name = message.from_user.full_name
+    
+    # Для кнопок - используем текст кнопки как вопрос
+    question = message.text
+    
+    # Показать индикатор печати
+    await bot.send_chat_action(message.chat.id, "typing")
+    
+    # Получить AI ответ (он сам найдёт нужную категорию)
+    logger.info(f"Вопрос от {user_id}: {question[:50]}...")
+    answer = await get_ai_response(user_id, question)
+    
+    # Сохранить в БД
+    await save_chat_history(user_id, user_name, question, answer)
+    
+    await message.answer(answer, parse_mode="Markdown", reply_markup=get_main_keyboard())
+
+
+# Обработчики кнопок - теперь все через единую функцию
 @dp.message(F.text.in_(["📚 Документы", "💰 Стоимость", "🎓 Бюджет", 
                         "🏠 Общежитие", "📝 Без ЕГЭ", "🏫 Формы обучения"]))
-async def handle_category_button(message: Message):
-    """Обработка кнопок категорий"""
-    category_map = {
-        "📚 Документы": "Поступление",
-        "💰 Стоимость": "Стоимость",
-        "🎓 Бюджет": "бюджет",
-        "🏠 Общежитие": "Общежитие",
-        "📝 Без ЕГЭ": "егэ",
-        "🏫 Формы обучения": "Формы"
-    }
-    
-    category = category_map.get(message.text, "")
-    
-    # Получить FAQ из категории
-    faqs = await get_faq_by_category(category)
-    
-    if faqs:
-        response = f"**{message.text}**\n\n{faqs[0]['answer']}"
-    else:
-        response = f"Информация по теме '{message.text}' не найдена.\n\n📞 8 (800) 550-03-63"
-    
-    await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+async def handle_category_buttons(message: Message):
+    """Обработка кнопок категорий через AI"""
+    await handle_question(message)
 
 
 @dp.message(F.text == "📞 Контакты")
 async def handle_contacts(message: Message):
+    """Контакты - можно оставить статичными"""
     contacts = """📞 **Контакты МУИВ:**
 
 ☎️ 8 (800) 550-03-63 (бесплатно)
@@ -384,34 +447,16 @@ async def handle_contacts(message: Message):
     await message.answer(contacts, parse_mode="Markdown")
 
 
-# Обработка текстовых сообщений
+@dp.message(F.text == "❓ Помощь")
+async def handle_help_button(message: Message):
+    await cmd_help(message)
+
+
+# Обработка всех остальных текстовых сообщений
 @dp.message(F.text)
 async def handle_text(message: Message):
-    user_id = message.from_user.id
-    user_name = message.from_user.full_name
-    question = message.text
-    
-    # Приветствия
-    if any(word in question.lower() for word in ["привет", "здравствуй", "добрый"]):
-        await message.answer("👋 Здравствуйте! Задавайте вопросы о поступлении!", 
-                           reply_markup=get_main_keyboard())
-        return
-    
-    if any(word in question.lower() for word in ["спасибо", "благодарю"]):
-        await message.answer("😊 Рад помочь! Обращайтесь!")
-        return
-    
-    # Показать индикатор
-    await bot.send_chat_action(message.chat.id, "typing")
-    
-    # Получить AI ответ
-    logger.info(f"Вопрос от {user_id}: {question[:50]}...")
-    answer = await get_ai_response(user_id, question)
-    
-    # Сохранить в БД
-    await save_chat_history(user_id, user_name, question, answer)
-    
-    await message.answer(answer, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    """Обработка текстовых вопросов через AI"""
+    await handle_question(message)
 
 
 # ========== ЗАПУСК ==========
