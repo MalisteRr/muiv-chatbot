@@ -111,7 +111,7 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
                     SELECT 1 FROM unnest(keywords) kw 
                     WHERE LOWER(kw) LIKE $1
                 )
-            ORDER BY priority DESC, created_at DESC
+            ORDER BY id DESC, created_at DESC
             LIMIT $2
             """
             
