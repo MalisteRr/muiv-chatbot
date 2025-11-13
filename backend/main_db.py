@@ -86,7 +86,7 @@ async def init_db():
 
 
 async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
-    """Поиск FAQ по ключевым словам"""
+    """Поиск FAQ по ключевым словам с поддержкой опечаток"""
     if not db_pool:
         logger.error("БД не подключена!")
         return []
@@ -95,13 +95,15 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
         async with db_pool.acquire() as conn:
             search_text = " ".join(keywords).lower()
             
-            query = """
+            # Сначала пробуем точный поиск
+            query_exact = """
             SELECT 
                 id,
                 question,
                 answer,
                 category,
-                keywords
+                keywords,
+                1.0 as relevance
             FROM faq
             WHERE 
                 LOWER(question) LIKE $1 OR 
@@ -111,13 +113,41 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
                     SELECT 1 FROM unnest(keywords) kw 
                     WHERE LOWER(kw) LIKE $1
                 )
-            ORDER BY id DESC, created_at DESC
+            ORDER BY created_at DESC
             LIMIT $2
             """
             
-            rows = await conn.fetch(query, f"%{search_text}%", limit)
+            rows = await conn.fetch(query_exact, f"%{search_text}%", limit)
             
-            logger.info(f"Найдено {len(rows)} результатов для '{search_text}'")
+            # Если ничего не найдено - используем нечеткий поиск (fuzzy)
+            if not rows:
+                logger.info(f"Точное совпадение не найдено, использую нечеткий поиск для '{search_text}'")
+                
+                query_fuzzy = """
+                SELECT 
+                    id,
+                    question,
+                    answer,
+                    category,
+                    keywords,
+                    GREATEST(
+                        similarity(LOWER(question), $1),
+                        similarity(LOWER(answer), $1),
+                        similarity(LOWER(category), $1)
+                    ) as relevance
+                FROM faq
+                WHERE 
+                    LOWER(question) % $1 OR 
+                    LOWER(answer) % $1 OR
+                    LOWER(category) % $1
+                ORDER BY relevance DESC
+                LIMIT $2
+                """
+                
+                rows = await conn.fetch(query_fuzzy, search_text, limit)
+                logger.info(f"Нечеткий поиск нашел {len(rows)} результатов")
+            else:
+                logger.info(f"Точный поиск нашел {len(rows)} результатов для '{search_text}'")
             
             return [
                 {
@@ -130,6 +160,8 @@ async def search_faq_by_keywords(keywords: list, limit: int = 3) -> list:
             ]
     except Exception as e:
         logger.error(f"Ошибка поиска: {e}", exc_info=True)
+        # Если pg_trgm не установлен, fallback на простой поиск
+        logger.warning("Возможно, расширение pg_trgm не установлено. Используйте: CREATE EXTENSION pg_trgm;")
         return []
 
 
