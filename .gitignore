@@ -1,27 +1,90 @@
-# Виртуальное окружение
-venv/
+# ========== Python ==========
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Секретные данные
-.env
-backend/.env
-*.key
+# ========== Virtual Environment ==========
+venv/
+ENV/
+env/
+.venv
 
-# Логи
-logs/
-*.log
-
-# IDE
+# ========== IDEs ==========
 .vscode/
 .idea/
 *.swp
-
-# Системные файлы
+*.swo
+*~
 .DS_Store
-Thumbs.db
 
-# База данных (локальные)
+# ========== Logs ==========
+logs/
+*.log
+
+# ========== Database ==========
 *.db
 *.sqlite
+*.sqlite3
+*.db-journal
+
+# ========= Backup Files ==========
+echo "*.backup" >> .gitignore
+echo "*.bak" >> .gitignore
+# ========== Environment Variables ==========
+.env
+.env.local
+.env.*.local
+
+# ========== Secrets ==========
+config.local.py
+secrets.py
+*.key
+*.pem
+
+# ========== Data Files ==========
+data/*.json
+!data/faq_sample.json
+data/*.csv
+data/*.xlsx
+
+# ========== Temporary Files ==========
+*.tmp
+*.temp
+*.cache
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ========== OS ==========
+Thumbs.db
+.DS_Store
+*.bak
+*.swp
+
+# ========== Docker ==========
+docker-compose.override.yml
+
+# ========== Project Specific ==========
+# Оставляем только пример:
+!.env.example
