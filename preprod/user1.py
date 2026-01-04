@@ -1,17 +1,14 @@
 """
 Обработчики пользовательских запросов
 Обработка вопросов через AI и базу знаний
-С улучшенным UX - показ прогресса обработки
 """
 
 import logging
 import asyncio
-import random
 from aiogram import Router, F
 from aiogram.types import Message
 
 from bot.keyboards import get_main_keyboard
-from bot.rating_keyboards import get_rating_keyboard
 from bot.dispatcher import bot
 from ml.chat_manager import ChatManager
 from database.crud import save_chat_message, log_question_analytics, create_or_update_user
@@ -24,67 +21,12 @@ router = Router(name='user')
 chat_manager = ChatManager()
 
 
-# Набор сообщений для разных этапов обработки
-PROCESSING_MESSAGES = {
-    'start': [
-        "🔍 Ищу информацию в базе знаний...",
-        "🤔 Анализирую ваш вопрос...",
-        "📚 Просматриваю базу данных университета...",
-        "🎯 Подбираю наиболее точный ответ...",
-    ],
-    'searching': [
-        "🔎 Поиск релевантной информации...",
-        "📖 Изучаю документацию МУИВ...",
-        "💡 Формирую ответ на основе официальных данных...",
-    ],
-    'ai_processing': [
-        "🤖 Генерирую персонализированный ответ...",
-        "✨ Обрабатываю запрос через AI...",
-        "📝 Формулирую понятный ответ...",
-    ]
-}
-
-
-async def send_progress_message(chat_id: int, stage: str = 'start') -> Message:
-    """
-    Отправить сообщение о прогрессе обработки
-    
-    Args:
-        chat_id: ID чата
-        stage: Этап обработки (start, searching, ai_processing)
-        
-    Returns:
-        Отправленное сообщение
-    """
-    messages = PROCESSING_MESSAGES.get(stage, PROCESSING_MESSAGES['start'])
-    text = random.choice(messages)
-    
-    return await bot.send_message(chat_id, text)
-
-
-async def update_progress_message(message: Message, new_text: str):
-    """
-    Обновить сообщение о прогрессе
-    
-    Args:
-        message: Сообщение для обновления
-        new_text: Новый текст
-    """
-    try:
-        await message.edit_text(new_text)
-    except Exception as e:
-        # Если редактирование не удалось (сообщение слишком старое и т.д.)
-        logger.debug(f"Не удалось обновить прогресс-сообщение: {e}")
-
-
-async def process_user_question(message: Message, show_progress: bool = True):
+async def process_user_question(message: Message):
     """
     Универсальная функция обработки вопросов пользователя
-    С показом прогресса обработки
     
     Args:
         message: Сообщение от пользователя
-        show_progress: Показывать ли прогресс-сообщения
     """
     user_id = message.from_user.id
     user_name = message.from_user.full_name
@@ -98,54 +40,21 @@ async def process_user_question(message: Message, show_progress: bool = True):
         last_name=message.from_user.last_name
     )
     
-    progress_msg = None
-    typing_task = None
+    # Показать индикатор "печатает..."
+    typing_task = asyncio.create_task(keep_typing(message.chat.id))
     
     logger.info(f"Вопрос от пользователя {user_id} ({user_name}): {question[:100]}...")
     
     try:
-        # ЭТАП 1: Отправить начальное сообщение о прогрессе
-        if show_progress:
-            progress_msg = await send_progress_message(message.chat.id, 'start')
-            await asyncio.sleep(0.5)  # Небольшая задержка для читаемости
-        
-        # Показать индикатор "печатает..."
-        typing_task = asyncio.create_task(keep_typing(message.chat.id))
-        
-        # ЭТАП 2: Поиск в базе знаний
-        if show_progress and progress_msg:
-            await update_progress_message(
-                progress_msg,
-                random.choice(PROCESSING_MESSAGES['searching'])
-            )
-        
-        # Небольшая задержка перед AI запросом (для UX)
-        await asyncio.sleep(0.3)
-        
-        # ЭТАП 3: Обработка через AI
-        if show_progress and progress_msg:
-            await update_progress_message(
-                progress_msg,
-                random.choice(PROCESSING_MESSAGES['ai_processing'])
-            )
-        
         # Получить ответ через ChatManager (AI + база знаний)
         response_data = await chat_manager.get_response(user_id, question)
         
         # Остановить индикатор печати
-        if typing_task:
-            typing_task.cancel()
+        typing_task.cancel()
         
         answer = response_data['answer']
         found_in_db = response_data['found_in_db']
         sources_used = response_data.get('sources', [])
-        
-        # ЭТАП 4: Удалить прогресс-сообщение
-        if progress_msg:
-            try:
-                await progress_msg.delete()
-            except Exception:
-                pass  # Не критично если не удалось удалить
         
         # Логирование для аналитики (в фоне, не блокируем ответ)
         asyncio.create_task(log_question_analytics(
@@ -165,24 +74,13 @@ async def process_user_question(message: Message, show_progress: bool = True):
             found_in_db=found_in_db
         ))
         
-        # ЭТАП 5: Отправить финальный ответ пользователю
+        # Отправить ответ пользователю
+        await message.answer(
+            answer,
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
         
-        bot_message = await message.answer(
-        answer,
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
-        )
-        # Добавить кнопки рейтинга (отдельное сообщение)
-        await message.answer(
-        "💭 Был ли ответ полезен?",
-        reply_markup=get_rating_keyboard(bot_message.message_id)
-        )
-
-        # Основная клавиатура
-        await message.answer(
-        "Выберите тему или задайте другой вопрос:",
-        reply_markup=get_main_keyboard()
-        )
         # Дополнительная информация для отладки (только для админов)
         if user_id in config.bot.admin_ids and config.debug:
             debug_info = f"\n\n_🔍 Debug: Найдено источников: {len(sources_used)}, В БД: {found_in_db}_"
@@ -198,15 +96,7 @@ async def process_user_question(message: Message, show_progress: bool = True):
         pass
     except Exception as e:
         # Остановить индикатор печати при ошибке
-        if typing_task:
-            typing_task.cancel()
-        
-        # Удалить прогресс-сообщение при ошибке
-        if progress_msg:
-            try:
-                await progress_msg.delete()
-            except Exception:
-                pass
+        typing_task.cancel()
         
         logger.error(f"Ошибка при обработке вопроса от {user_id}: {e}", exc_info=True)
         
@@ -254,9 +144,8 @@ async def handle_category_buttons(message: Message):
     """
     Обработчик кнопок категорий
     Все вопросы обрабатываются через AI для естественных ответов
-    С показом прогресса (т.к. это быстрые кнопки)
     """
-    await process_user_question(message, show_progress=True)
+    await process_user_question(message)
 
 
 # ========== ОБРАБОТЧИК ПРОИЗВОЛЬНОГО ТЕКСТА ==========
@@ -266,16 +155,12 @@ async def handle_text_message(message: Message):
     """
     Обработчик всех текстовых сообщений
     Главный обработчик вопросов пользователей
-    С показом прогресса для длинных запросов
     """
     # Игнорировать команды (они обрабатываются отдельно)
     if message.text.startswith('/'):
         return
     
-    # Показываем прогресс для всех текстовых вопросов
-    show_progress = len(message.text) > 10  # Показывать прогресс если вопрос длиннее 10 символов
-    
-    await process_user_question(message, show_progress=show_progress)
+    await process_user_question(message)
 
 
 # ========== ОБРАБОТЧИКИ ДРУГИХ ТИПОВ СООБЩЕНИЙ ==========
@@ -319,6 +204,7 @@ async def handle_sticker(message: Message):
         "👍 Понял настроение! Что вы хотите узнать о поступлении?"
     ]
     
+    import random
     await message.answer(
         random.choice(sticker_responses),
         reply_markup=get_main_keyboard()
