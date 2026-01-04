@@ -72,7 +72,7 @@ class AIConfig:
             base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
             model=os.getenv("LLM_MODEL", "deepseek/deepseek-chat"),
             temperature=float(os.getenv("AI_TEMPERATURE", "0.7")),
-            max_tokens=int(os.getenv("AI_MAX_TOKENS", "200"))
+            max_tokens=int(os.getenv("AI_MAX_TOKENS", "500"))
         )
 
 
