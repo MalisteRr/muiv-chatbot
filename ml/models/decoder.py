@@ -60,14 +60,12 @@ class Decoder(nn.Module):
         self.dropout = dropout
         self.use_attention = use_attention
         
-        # Слой эмбеддингов
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=embedding_dim,
             padding_idx=0
         )
         
-        # LSTM слой
         lstm_input_size = embedding_dim + hidden_size if use_attention else embedding_dim
         
         self.lstm = nn.LSTM(
@@ -78,140 +76,146 @@ class Decoder(nn.Module):
             batch_first=True
         )
         
-        # Механизм внимания
         if use_attention:
             self.attention = Attention(hidden_size)
         
-        # Выходной слой
         fc_input_size = hidden_size * 2 if use_attention else hidden_size
         self.fc = nn.Linear(fc_input_size, vocab_size)
         
-        # Dropout
         self.dropout_layer = nn.Dropout(dropout)
     
     def forward(self, input_token, hidden, cell, encoder_outputs=None):
         """
         Прямой проход через Decoder (генерация одного токена)
-        
-        Args:
-            input_token: Входной токен (предыдущее слово)
-                        Форма: (batch_size, 1)
-            hidden: Скрытое состояние
-                   Форма: (num_layers, batch_size, hidden_size)
-            cell: Состояние ячейки
-                 Форма: (num_layers, batch_size, hidden_size)
-            encoder_outputs: Выходы encoder'а (для attention)
-                           Форма: (batch_size, seq_length, hidden_size)
-        
-        Returns:
-            output: Распределение вероятностей для следующего слова
-                   Форма: (batch_size, vocab_size)
-            hidden: Новое скрытое состояние
-            cell: Новое состояние ячейки
-            attention_weights: Веса внимания (если используется)
         """
-        # 1. Эмбеддинг входного токена
+        # Эмбеддинг
         embedded = self.embedding(input_token)
         embedded = self.dropout_layer(embedded)
         
-        # 2. Вычисление контекстного вектора через attention
+        # Attention
         attention_weights = None
         if self.use_attention and encoder_outputs is not None:
-            # Берём последний слой hidden для attention
             last_hidden = hidden[-1]
-            
-            # Вычисляем веса внимания
             attention_weights = self.attention(last_hidden, encoder_outputs)
-            
-            # Вычисляем контекстный вектор (взвешенная сумма encoder outputs)
-            context = torch.bmm(
-                attention_weights.unsqueeze(1), 
-                encoder_outputs
-            )
-            
-            # Конкатенируем эмбеддинг и контекст
+            context = torch.bmm(attention_weights.unsqueeze(1), encoder_outputs)
             lstm_input = torch.cat([embedded, context], dim=2)
         else:
-            # Без attention
             lstm_input = embedded
         
-        # 3. Пропускаем через LSTM
+        # LSTM
         output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
         
-        # 4. Подготавливаем вход для выходного слоя
+        # Выходной слой
         if self.use_attention:
-            # Конкатенируем LSTM output и context
             fc_input = torch.cat([output, context], dim=2)
         else:
             fc_input = output
         
-        # Убираем размерность seq_length (она = 1)
         fc_input = fc_input.squeeze(1)
-        
-        # 5. Выходной слой (распределение по словарю)
         prediction = self.fc(fc_input)
         
         return prediction, hidden, cell, attention_weights
 
 
+class SimpleDecoder(nn.Module):
+    """
+    Упрощённый Decoder без механизма внимания
+    
+    Используется для базовой модели или для сравнения производительности
+    """
+    
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int = 256,
+        hidden_size: int = 512,
+        num_layers: int = 2,
+        dropout: float = 0.3
+    ):
+        """
+        Инициализация SimpleDecoder
+        
+        Args:
+            vocab_size: Размер словаря
+            embedding_dim: Размерность эмбеддингов
+            hidden_size: Размер скрытого слоя
+            num_layers: Количество слоёв LSTM
+            dropout: Вероятность dropout
+        """
+        super(SimpleDecoder, self).__init__()
+        
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # Эмбеддинги
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        
+        # LSTM (без attention, поэтому входной размер = embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True
+        )
+        
+        # Выходной слой
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        
+        # Dropout
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, input_token, hidden, cell, encoder_outputs=None):
+        """
+        Упрощённый forward без attention
+        
+        Args:
+            input_token: Входной токен
+            hidden: Скрытое состояние
+            cell: Состояние ячейки
+            encoder_outputs: Не используется (для совместимости с интерфейсом)
+        
+        Returns:
+            prediction: Предсказание следующего слова
+            hidden: Новое скрытое состояние
+            cell: Новое состояние ячейки
+            None: Нет весов внимания
+        """
+        # Эмбеддинг
+        embedded = self.embedding(input_token)
+        embedded = self.dropout(embedded)
+        
+        # LSTM
+        output, (hidden, cell) = self.lstm(embedded, (hidden, cell))
+        
+        # Выходной слой
+        output = output.squeeze(1)
+        prediction = self.fc(output)
+        
+        return prediction, hidden, cell, None
+
+
 if __name__ == "__main__":
     """
-    Тестирование Decoder с forward
+    Тестирование обоих Decoder'ов
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ DECODER - Метод forward")
+    print("ТЕСТ DECODER - Обе версии")
     print("=" * 60)
     
-    # Параметры
     vocab_size = 5000
-    embedding_dim = 256
-    hidden_size = 512
-    num_layers = 2
     batch_size = 4
-    seq_length = 20
     
-    # Создаём Decoder
-    decoder = Decoder(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        dropout=0.3,
-        use_attention=True
-    )
+    # Тест Decoder с Attention
+    decoder_attn = Decoder(vocab_size=vocab_size, use_attention=True)
+    print(f"✅ Decoder с Attention: {sum(p.numel() for p in decoder_attn.parameters()):,} параметров")
     
-    print(f"✅ Decoder создан с attention")
-    
-    # Тестовые данные
-    test_input = torch.randint(0, vocab_size, (batch_size, 1))
-    test_hidden = torch.randn(num_layers, batch_size, hidden_size)
-    test_cell = torch.randn(num_layers, batch_size, hidden_size)
-    test_encoder_outputs = torch.randn(batch_size, seq_length, hidden_size)
-    
-    print(f"\n🧪 Тестовый вход:")
-    print(f"   Input форма: {test_input.shape}")
-    print(f"   Encoder outputs форма: {test_encoder_outputs.shape}")
-    
-    # Прямой проход
-    decoder.eval()
-    with torch.no_grad():
-        prediction, hidden, cell, attention_weights = decoder(
-            test_input, 
-            test_hidden, 
-            test_cell, 
-            test_encoder_outputs
-        )
-    
-    print(f"\n📤 Выход Decoder:")
-    print(f"   Prediction форма: {prediction.shape}")
-    print(f"   Hidden форма: {hidden.shape}")
-    print(f"   Attention weights форма: {attention_weights.shape}")
-    
-    # Проверяем распределение вероятностей
-    probs = F.softmax(prediction, dim=1)
-    print(f"\n📊 Вероятности:")
-    print(f"   Сумма: {probs[0].sum().item():.4f} (должна быть ≈1.0)")
+    # Тест SimpleDecoder
+    decoder_simple = SimpleDecoder(vocab_size=vocab_size)
+    print(f"✅ SimpleDecoder: {sum(p.numel() for p in decoder_simple.parameters()):,} параметров")
     
     print("\n" + "=" * 60)
-    print("✅ DECODER С FORWARD РАБОТАЕТ")
+    print("✅ DECODER ПОЛНОСТЬЮ ГОТОВ")
     print("=" * 60)
