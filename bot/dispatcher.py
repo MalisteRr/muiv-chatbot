@@ -7,8 +7,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from config import config
-
-from config import config
+from bot.handlers import rating_handlers as rating_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,7 @@ try:
     # Регистрация роутеров (порядок важен!)
     dp.include_router(admin_router)
     dp.include_router(common_router)
+    dp.include_router(rating_handlers.router)
     dp.include_router(user_router)
     logger.info("✅ Все роутеры зарегистрированы")
     
