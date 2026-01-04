@@ -10,7 +10,7 @@ DataLoader для подготовки батчей данных
 
 import json
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from typing import List, Dict, Tuple
 
 from .tokenizer import SimpleTokenizer
@@ -28,60 +28,36 @@ class QADataset(Dataset):
         tokenizer: SimpleTokenizer,
         max_length: int = 100
     ):
-        """
-        Инициализация датасета
-        
-        Args:
-            data_path: Путь к JSON файлу с данными
-            tokenizer: Токенизатор
-            max_length: Максимальная длина последовательности
-        """
         self.tokenizer = tokenizer
         self.max_length = max_length
         
-        # Загружаем данные
         with open(data_path, 'r', encoding='utf-8') as f:
             self.data = json.load(f)
         
         print(f"✅ Загружено {len(self.data)} пар вопрос-ответ")
     
     def __len__(self):
-        """Размер датасета"""
         return len(self.data)
     
     def __getitem__(self, idx):
-        """
-        Получение одного примера
-        
-        Args:
-            idx: Индекс примера
-        
-        Returns:
-            question_indices: Закодированный вопрос
-            answer_indices: Закодированный ответ
-            question_length: Реальная длина вопроса
-            answer_length: Реальная длина ответа
-        """
         item = self.data[idx]
         question = item['question']
         answer = item['answer']
         
-        # Кодируем вопрос и ответ
         question_indices = self.tokenizer.encode(
             question,
             max_length=self.max_length,
-            add_sos=False,  # SOS не нужен для encoder
-            add_eos=True    # EOS нужен
+            add_sos=False,
+            add_eos=True
         )
         
         answer_indices = self.tokenizer.encode(
             answer,
             max_length=self.max_length,
-            add_sos=True,   # SOS нужен для decoder
-            add_eos=True    # EOS тоже нужен
+            add_sos=True,
+            add_eos=True
         )
         
-        # Вычисляем реальные длины (до паддинга)
         question_length = sum(1 for idx in question_indices if idx != 0)
         answer_length = sum(1 for idx in answer_indices if idx != 0)
         
@@ -93,15 +69,116 @@ class QADataset(Dataset):
         )
 
 
+def collate_fn(batch):
+    """
+    Функция для объединения примеров в батч
+    
+    Args:
+        batch: Список примеров (вопрос, ответ, длины)
+    
+    Returns:
+        questions: Батч вопросов (batch_size, max_seq_len)
+        answers: Батч ответов (batch_size, max_seq_len)
+        question_lengths: Длины вопросов (batch_size,)
+        answer_lengths: Длины ответов (batch_size,)
+    """
+    # Распаковываем батч
+    questions, answers, q_lengths, a_lengths = zip(*batch)
+    
+    # Стекаем в тензоры
+    questions = torch.stack(questions)
+    answers = torch.stack(answers)
+    question_lengths = torch.LongTensor(q_lengths)
+    answer_lengths = torch.LongTensor(a_lengths)
+    
+    # Сортируем по убыванию длины вопросов (требование pack_padded_sequence)
+    sorted_indices = question_lengths.argsort(descending=True)
+    
+    questions = questions[sorted_indices]
+    answers = answers[sorted_indices]
+    question_lengths = question_lengths[sorted_indices]
+    answer_lengths = answer_lengths[sorted_indices]
+    
+    return questions, answers, question_lengths, answer_lengths
+
+
+def create_dataloaders(
+    train_path: str,
+    val_path: str = None,
+    tokenizer: SimpleTokenizer = None,
+    batch_size: int = 32,
+    max_length: int = 100,
+    num_workers: int = 0
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Создание DataLoader'ов для обучения и валидации
+    
+    Args:
+        train_path: Путь к обучающим данным
+        val_path: Путь к валидационным данным (опционально)
+        tokenizer: Токенизатор
+        batch_size: Размер батча
+        max_length: Максимальная длина последовательности
+        num_workers: Количество процессов для загрузки данных
+    
+    Returns:
+        train_loader: DataLoader для обучения
+        val_loader: DataLoader для валидации (или None)
+    """
+    # Загружаем токенизатор если не передан
+    if tokenizer is None:
+        tokenizer = SimpleTokenizer.load(ModelConfig.TOKENIZER_PATH)
+    
+    # Создаём обучающий датасет
+    train_dataset = QADataset(
+        data_path=train_path,
+        tokenizer=tokenizer,
+        max_length=max_length
+    )
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True  # Ускоряет передачу на GPU
+    )
+    
+    # Создаём валидационный датасет если есть
+    val_loader = None
+    if val_path:
+        val_dataset = QADataset(
+            data_path=val_path,
+            tokenizer=tokenizer,
+            max_length=max_length
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+    
+    print(f"\n📊 DataLoaders созданы:")
+    print(f"   Train батчей: {len(train_loader)}")
+    print(f"   Val батчей: {len(val_loader) if val_loader else 0}")
+    print(f"   Batch size: {batch_size}")
+    
+    return train_loader, val_loader
+
+
 if __name__ == "__main__":
     """
-    Тестирование QADataset
+    Тестирование DataLoader
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ QADATASET")
+    print("ТЕСТ DATALOADER")
     print("=" * 60)
     
-    # Создаём простой тестовый датасет
     import tempfile
     
     test_data = [
@@ -114,20 +191,14 @@ if __name__ == "__main__":
             "question": "Какие документы нужны?",
             "answer": "Необходимы паспорт, аттестат и фотографии.",
             "category": "Документы"
-        },
-        {
-            "question": "Есть ли бюджетные места?",
-            "answer": "Да, доступно 25 бюджетных мест.",
-            "category": "Бюджет"
         }
     ] * 10
     
-    # Сохраняем во временный файл
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
         json.dump(test_data, f, ensure_ascii=False)
         temp_path = f.name
     
-    # Создаём токенизатор
+    # Токенизатор
     tokenizer = SimpleTokenizer(vocab_size=1000)
     all_texts = []
     for item in test_data:
@@ -135,36 +206,32 @@ if __name__ == "__main__":
         all_texts.append(item['answer'])
     tokenizer.build_vocab(all_texts)
     
-    # Создаём датасет
-    dataset = QADataset(
-        data_path=temp_path,
-        tokenizer=tokenizer,
-        max_length=50
+    # Датасет
+    dataset = QADataset(temp_path, tokenizer, max_length=50)
+    
+    # DataLoader
+    dataloader = DataLoader(
+        dataset,
+        batch_size=4,
+        shuffle=True,
+        collate_fn=collate_fn
     )
     
-    print(f"\n📊 Dataset создан:")
-    print(f"   Размер: {len(dataset)}")
+    print(f"\n📊 DataLoader создан:")
+    print(f"   Батчей: {len(dataloader)}")
     
-    # Тестируем получение одного примера
-    q, a, q_len, a_len = dataset[0]
+    # Тест батча
+    questions, answers, q_lengths, a_lengths = next(iter(dataloader))
     
-    print(f"\n🧪 Первый пример:")
-    print(f"   Question форма: {q.shape}")
-    print(f"   Answer форма: {a.shape}")
-    print(f"   Q length: {q_len}")
-    print(f"   A length: {a_len}")
+    print(f"\n🧪 Тестовый батч:")
+    print(f"   Questions: {questions.shape}")
+    print(f"   Answers: {answers.shape}")
+    print(f"   Q lengths: {q_lengths.tolist()}")
+    print(f"   A lengths: {a_lengths.tolist()}")
     
-    # Декодируем
-    decoded_q = tokenizer.decode(q.tolist())
-    decoded_a = tokenizer.decode(a.tolist())
-    print(f"\n📝 Декодированный пример:")
-    print(f"   Вопрос: {decoded_q}")
-    print(f"   Ответ: {decoded_a}")
-    
-    # Удаляем временный файл
     import os
     os.remove(temp_path)
     
     print("\n" + "=" * 60)
-    print("✅ QADATASET РАБОТАЕТ")
+    print("✅ DATALOADER РАБОТАЕТ")
     print("=" * 60)
