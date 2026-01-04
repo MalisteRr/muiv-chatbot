@@ -19,8 +19,6 @@ from .decoder import Decoder
 class Seq2Seq(nn.Module):
     """
     Seq2Seq модель для генерации ответов
-    
-    Объединяет Encoder и Decoder в единую архитектуру
     """
     
     def __init__(
@@ -29,72 +27,127 @@ class Seq2Seq(nn.Module):
         decoder: Decoder,
         device: str = 'cpu'
     ):
-        """
-        Инициализация Seq2Seq
-        
-        Args:
-            encoder: Экземпляр Encoder
-            decoder: Экземпляр Decoder
-            device: Устройство (cpu или cuda)
-        """
         super(Seq2Seq, self).__init__()
         
         self.encoder = encoder
         self.decoder = decoder
         self.device = device
         
-        # Проверка совместимости encoder и decoder
+        # Проверка совместимости
         assert encoder.hidden_size == decoder.hidden_size, \
             "Hidden size encoder'а и decoder'а должны совпадать!"
         assert encoder.num_layers == decoder.num_layers, \
             "Количество слоёв encoder'а и decoder'а должно совпадать!"
     
-    def count_parameters(self):
+    def forward(
+        self, 
+        src, 
+        trg, 
+        src_lengths=None,
+        teacher_forcing_ratio: float = 0.5
+    ):
         """
-        Подсчёт количества обучаемых параметров
+        Прямой проход через Seq2Seq (обучение)
+        
+        Args:
+            src: Входная последовательность (вопрос)
+                Форма: (batch_size, src_seq_length)
+            trg: Целевая последовательность (ответ)
+                Форма: (batch_size, trg_seq_length)
+            src_lengths: Реальные длины входных последовательностей
+            teacher_forcing_ratio: Вероятность использования teacher forcing
+                                  1.0 = всегда используем правильный токен
+                                  0.0 = всегда используем предсказание модели
         
         Returns:
-            Количество параметров
+            outputs: Предсказания для каждого временного шага
+                    Форма: (batch_size, trg_seq_length, vocab_size)
         """
+        batch_size = src.size(0)
+        trg_len = trg.size(1)
+        trg_vocab_size = self.decoder.vocab_size
+        
+        # Тензор для хранения выходов decoder'а
+        outputs = torch.zeros(batch_size, trg_len, trg_vocab_size).to(self.device)
+        
+        # 1. ENCODER: обрабатываем входную последовательность
+        encoder_outputs, hidden, cell = self.encoder(src, src_lengths)
+        
+        # 2. DECODER: генерируем ответ токен за токеном
+        
+        # Первый токен decoder'а - это всегда <SOS> (Start Of Sequence)
+        decoder_input = trg[:, 0].unsqueeze(1)  # (batch_size, 1)
+        
+        for t in range(1, trg_len):
+            # Предсказываем следующий токен
+            prediction, hidden, cell, attention_weights = self.decoder(
+                decoder_input,
+                hidden,
+                cell,
+                encoder_outputs if self.decoder.use_attention else None
+            )
+            
+            # Сохраняем предсказание
+            outputs[:, t, :] = prediction
+            
+            # Решаем использовать ли teacher forcing
+            use_teacher_forcing = random.random() < teacher_forcing_ratio
+            
+            # Получаем токен с максимальной вероятностью
+            top_prediction = prediction.argmax(1)
+            
+            # Выбираем входной токен для следующего шага
+            if use_teacher_forcing:
+                # Teacher forcing: используем правильный токен
+                decoder_input = trg[:, t].unsqueeze(1)
+            else:
+                # Используем предсказание модели
+                decoder_input = top_prediction.unsqueeze(1)
+        
+        return outputs
+    
+    def count_parameters(self):
+        """Подсчёт количества обучаемых параметров"""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 if __name__ == "__main__":
     """
-    Тестирование базовой структуры Seq2Seq
+    Тестирование Seq2Seq с forward
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ SEQ2SEQ - Базовая структура")
+    print("ТЕСТ SEQ2SEQ - Метод forward")
     print("=" * 60)
     
     vocab_size = 5000
-    embedding_dim = 256
-    hidden_size = 512
-    num_layers = 2
+    batch_size = 4
+    src_len = 20
+    trg_len = 25
     
-    # Создаём encoder и decoder
-    encoder = Encoder(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_size=hidden_size,
-        num_layers=num_layers
-    )
-    
-    decoder = Decoder(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        use_attention=True
-    )
-    
-    # Создаём seq2seq модель
+    # Создаём модель
+    encoder = Encoder(vocab_size=vocab_size)
+    decoder = Decoder(vocab_size=vocab_size, use_attention=True)
     model = Seq2Seq(encoder, decoder, device='cpu')
     
-    print(f"✅ Seq2Seq модель создана:")
-    print(f"   Параметров: {model.count_parameters():,}")
-    print(f"   Устройство: cpu")
+    # Тестовые данные
+    src = torch.randint(0, vocab_size, (batch_size, src_len))
+    trg = torch.randint(0, vocab_size, (batch_size, trg_len))
+    src_lengths = torch.tensor([20, 18, 15, 12])
+    
+    print(f"✅ Модель создана: {model.count_parameters():,} параметров")
+    print(f"\n🧪 Тестовый вход:")
+    print(f"   Source: {src.shape}")
+    print(f"   Target: {trg.shape}")
+    
+    # Прямой проход
+    model.eval()
+    with torch.no_grad():
+        outputs = model(src, trg, src_lengths, teacher_forcing_ratio=1.0)
+    
+    print(f"\n📤 Выход:")
+    print(f"   Форма: {outputs.shape}")
+    print(f"   Ожидалось: ({batch_size}, {trg_len}, {vocab_size})")
     
     print("\n" + "=" * 60)
-    print("✅ БАЗОВАЯ СТРУКТУРА SEQ2SEQ ГОТОВА")
+    print("✅ FORWARD РАБОТАЕТ")
     print("=" * 60)
