@@ -33,7 +33,6 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.device = device
         
-        # Проверка совместимости
         assert encoder.hidden_size == decoder.hidden_size, \
             "Hidden size encoder'а и decoder'а должны совпадать!"
         assert encoder.num_layers == decoder.num_layers, \
@@ -48,38 +47,20 @@ class Seq2Seq(nn.Module):
     ):
         """
         Прямой проход через Seq2Seq (обучение)
-        
-        Args:
-            src: Входная последовательность (вопрос)
-                Форма: (batch_size, src_seq_length)
-            trg: Целевая последовательность (ответ)
-                Форма: (batch_size, trg_seq_length)
-            src_lengths: Реальные длины входных последовательностей
-            teacher_forcing_ratio: Вероятность использования teacher forcing
-                                  1.0 = всегда используем правильный токен
-                                  0.0 = всегда используем предсказание модели
-        
-        Returns:
-            outputs: Предсказания для каждого временного шага
-                    Форма: (batch_size, trg_seq_length, vocab_size)
         """
         batch_size = src.size(0)
         trg_len = trg.size(1)
         trg_vocab_size = self.decoder.vocab_size
         
-        # Тензор для хранения выходов decoder'а
         outputs = torch.zeros(batch_size, trg_len, trg_vocab_size).to(self.device)
         
-        # 1. ENCODER: обрабатываем входную последовательность
+        # Encoder
         encoder_outputs, hidden, cell = self.encoder(src, src_lengths)
         
-        # 2. DECODER: генерируем ответ токен за токеном
-        
-        # Первый токен decoder'а - это всегда <SOS> (Start Of Sequence)
-        decoder_input = trg[:, 0].unsqueeze(1)  # (batch_size, 1)
+        # Decoder
+        decoder_input = trg[:, 0].unsqueeze(1)
         
         for t in range(1, trg_len):
-            # Предсказываем следующий токен
             prediction, hidden, cell, attention_weights = self.decoder(
                 decoder_input,
                 hidden,
@@ -87,24 +68,93 @@ class Seq2Seq(nn.Module):
                 encoder_outputs if self.decoder.use_attention else None
             )
             
-            # Сохраняем предсказание
             outputs[:, t, :] = prediction
             
-            # Решаем использовать ли teacher forcing
             use_teacher_forcing = random.random() < teacher_forcing_ratio
-            
-            # Получаем токен с максимальной вероятностью
             top_prediction = prediction.argmax(1)
             
-            # Выбираем входной токен для следующего шага
             if use_teacher_forcing:
-                # Teacher forcing: используем правильный токен
                 decoder_input = trg[:, t].unsqueeze(1)
             else:
-                # Используем предсказание модели
                 decoder_input = top_prediction.unsqueeze(1)
         
         return outputs
+    
+    def generate(
+        self, 
+        src, 
+        src_lengths=None,
+        max_length: int = 100,
+        sos_token: int = 2,
+        eos_token: int = 3
+    ):
+        """
+        Генерация ответа (inference/тестирование)
+        
+        Args:
+            src: Входная последовательность (вопрос)
+                Форма: (batch_size, src_seq_length)
+            src_lengths: Реальные длины входных последовательностей
+            max_length: Максимальная длина генерируемого ответа
+            sos_token: Индекс токена <SOS>
+            eos_token: Индекс токена <EOS>
+        
+        Returns:
+            generated_tokens: Сгенерированные токены
+                            Форма: (batch_size, generated_length)
+        """
+        self.eval()
+        
+        batch_size = src.size(0)
+        
+        with torch.no_grad():
+            # 1. Encoder
+            encoder_outputs, hidden, cell = self.encoder(src, src_lengths)
+            
+            # 2. Decoder - генерация
+            
+            # Начинаем с <SOS> токена
+            decoder_input = torch.full(
+                (batch_size, 1), 
+                sos_token, 
+                dtype=torch.long
+            ).to(self.device)
+            
+            # Список для хранения сгенерированных токенов
+            generated_tokens = []
+            
+            # Флаг завершения генерации для каждого примера в батче
+            finished = torch.zeros(batch_size, dtype=torch.bool).to(self.device)
+            
+            for _ in range(max_length):
+                # Предсказываем следующий токен
+                prediction, hidden, cell, _ = self.decoder(
+                    decoder_input,
+                    hidden,
+                    cell,
+                    encoder_outputs if self.decoder.use_attention else None
+                )
+                
+                # Получаем токен с максимальной вероятностью
+                next_token = prediction.argmax(1)
+                
+                # Сохраняем сгенерированный токен
+                generated_tokens.append(next_token.unsqueeze(1))
+                
+                # Проверяем встретился ли <EOS> токен
+                finished = finished | (next_token == eos_token)
+                
+                # Если все последовательности завершились - останавливаемся
+                if finished.all():
+                    break
+                
+                # Следующий вход для decoder'а
+                decoder_input = next_token.unsqueeze(1)
+            
+            # Объединяем все токены
+            generated_tokens = torch.cat(generated_tokens, dim=1)
+        
+        return generated_tokens
     
     def count_parameters(self):
         """Подсчёт количества обучаемых параметров"""
@@ -113,41 +163,36 @@ class Seq2Seq(nn.Module):
 
 if __name__ == "__main__":
     """
-    Тестирование Seq2Seq с forward
+    Тестирование Seq2Seq с generate
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ SEQ2SEQ - Метод forward")
+    print("ТЕСТ SEQ2SEQ - Метод generate")
     print("=" * 60)
     
     vocab_size = 5000
     batch_size = 4
     src_len = 20
-    trg_len = 25
     
-    # Создаём модель
     encoder = Encoder(vocab_size=vocab_size)
     decoder = Decoder(vocab_size=vocab_size, use_attention=True)
     model = Seq2Seq(encoder, decoder, device='cpu')
     
     # Тестовые данные
     src = torch.randint(0, vocab_size, (batch_size, src_len))
-    trg = torch.randint(0, vocab_size, (batch_size, trg_len))
     src_lengths = torch.tensor([20, 18, 15, 12])
     
-    print(f"✅ Модель создана: {model.count_parameters():,} параметров")
-    print(f"\n🧪 Тестовый вход:")
-    print(f"   Source: {src.shape}")
-    print(f"   Target: {trg.shape}")
+    print(f"✅ Модель создана")
+    print(f"\n🧪 Генерация ответа:")
+    print(f"   Вход: {src.shape}")
     
-    # Прямой проход
-    model.eval()
+    # Генерация
     with torch.no_grad():
-        outputs = model(src, trg, src_lengths, teacher_forcing_ratio=1.0)
+        generated = model.generate(src, src_lengths, max_length=30)
     
-    print(f"\n📤 Выход:")
-    print(f"   Форма: {outputs.shape}")
-    print(f"   Ожидалось: ({batch_size}, {trg_len}, {vocab_size})")
+    print(f"\n📤 Сгенерировано:")
+    print(f"   Форма: {generated.shape}")
+    print(f"   Первая последовательность (первые 10): {generated[0][:10].tolist()}")
     
     print("\n" + "=" * 60)
-    print("✅ FORWARD РАБОТАЕТ")
+    print("✅ GENERATE РАБОТАЕТ")
     print("=" * 60)
