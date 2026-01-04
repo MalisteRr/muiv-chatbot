@@ -11,6 +11,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 
 from bot.keyboards import get_main_keyboard
+from bot.rating_keyboards import get_rating_keyboard
 from bot.dispatcher import bot
 from ml.chat_manager import ChatManager
 from database.crud import save_chat_message, log_question_analytics, create_or_update_user
@@ -165,12 +166,23 @@ async def process_user_question(message: Message, show_progress: bool = True):
         ))
         
         # ЭТАП 5: Отправить финальный ответ пользователю
-        await message.answer(
-            answer,
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
         
+        bot_message = await message.answer(
+        answer,
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+        )
+        # Добавить кнопки рейтинга (отдельное сообщение)
+        await message.answer(
+        "💭 Был ли ответ полезен?",
+        reply_markup=get_rating_keyboard(bot_message.message_id)
+        )
+
+        # Основная клавиатура
+        await message.answer(
+        "Выберите тему или задайте другой вопрос:",
+        reply_markup=get_main_keyboard()
+        )
         # Дополнительная информация для отладки (только для админов)
         if user_id in config.bot.admin_ids and config.debug:
             debug_info = f"\n\n_🔍 Debug: Найдено источников: {len(sources_used)}, В БД: {found_in_db}_"
