@@ -1,140 +1,131 @@
 """
-Что делает скрипт:
-1. Загружает подготовленный датасет
-2. Извлекает все вопросы и ответы
-3. Строит словарь на основе частотности слов
-4. Сохраняет токенизатор для дальнейшего использования
+Построение словаря (токенизатора) на основе подготовленных данных
+
+Создаёт токенизатор, который будет использоваться для преобразования текста в последовательности чисел.
 """
 
-import json
-import os
 import sys
+import os
+import json
+from pathlib import Path
 
-# Добавляем корневую директорию в путь
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+# Добавляем корневую директорию проекта в путь
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from ml.models.tokenizer import SimpleTokenizer
 from ml.models.config import ModelConfig
 
 
-def load_dataset():
+def build_vocabulary():
     """
-    Загрузка подготовленного датасета
-    
-    Returns:
-        Список пар вопрос-ответ
+    Построение словаря на основе обучающих данных
     """
-    try:
-        with open(ModelConfig.DATA_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        print(f"✅ Загружен датасет: {len(data)} пар")
-        return data
-    except FileNotFoundError:
-        print(f"❌ Файл датасета не найден: {ModelConfig.DATA_PATH}")
-        print("   Сначала запустите: python scripts/prepare_dataset.py")
-        return []
-
-
-def extract_texts(dataset):
-    """
-    Извлечение всех текстов (вопросы + ответы) из датасета
+    print("\n" + "=" * 70)
+    print("ПОСТРОЕНИЕ СЛОВАРЯ (ТОКЕНИЗАТОРА)")
+    print("=" * 70)
     
-    Args:
-        dataset: Список пар вопрос-ответ
-        
-    Returns:
-        Список всех текстов
-    """
-    all_texts = []
+    # 1. Проверка наличия данных
+    print(f"\n📂 Проверка данных...")
     
-    for item in dataset:
-        all_texts.append(item['question'])
-        all_texts.append(item['answer'])
-    
-    print(f"📊 Извлечено {len(all_texts)} текстов:")
-    print(f"   • Вопросов: {len(dataset)}")
-    print(f"   • Ответов: {len(dataset)}")
-    
-    return all_texts
-
-
-def print_vocabulary_stats(tokenizer):
-    """
-    Вывод статистики по построенному словарю
-    
-    Args:
-        tokenizer: Токенизатор со словарём
-    """
-    print("\n" + "=" * 60)
-    print("СТАТИСТИКА СЛОВАРЯ")
-    print("=" * 60)
-    
-    print(f"📚 Размер словаря: {tokenizer.get_vocab_size()} слов")
-    print(f"   • Специальные токены: 4")
-    print(f"   • Обычные слова: {tokenizer.get_vocab_size() - 4}")
-    
-    # Топ-20 самых частотных слов
-    print(f"\n🔝 Топ-20 самых частотных слов:")
-    top_words = tokenizer.word_count.most_common(20)
-    for idx, (word, count) in enumerate(top_words, 1):
-        print(f"   {idx:2d}. {word:15s} - {count:4d} раз")
-    
-    # Примеры кодирования
-    print(f"\n🧪 Примеры кодирования:")
-    test_texts = [
-        "Сколько стоит обучение?",
-        "Есть ли бюджетные места?",
-        "Какие документы нужны?"
-    ]
-    
-    for text in test_texts:
-        encoded = tokenizer.encode(text, max_length=20)
-        decoded = tokenizer.decode(encoded)
-        print(f"\n   Исходный: {text}")
-        print(f"   Индексы: {encoded[:10]}... (первые 10)")
-        print(f"   Декодированный: {decoded}")
-    
-    print("=" * 60)
-
-
-def main():
-    """
-    Основная функция
-    """
-    print("\n" + "=" * 60)
-    print("ПОСТРОЕНИЕ СЛОВАРЯ ДЛЯ МОДЕЛИ")
-    print("=" * 60)
-    
-    # Загружаем датасет
-    dataset = load_dataset()
-    if not dataset:
-        print("\n❌ Не удалось загрузить датасет. Завершение.")
+    if not os.path.exists(ModelConfig.DATA_PATH):
+        print(f"❌ Датасет не найден: {ModelConfig.DATA_PATH}")
+        print(f"\n💡 Сначала запустите:")
+        print(f"   python scripts/prepare_dataset.py")
         return
     
-    # Извлекаем тексты
-    all_texts = extract_texts(dataset)
+    print(f"✅ Датасет найден: {ModelConfig.DATA_PATH}")
     
-    # Создаём токенизатор
-    print(f"\n🔨 Создание токенизатора (vocab_size={ModelConfig.VOCAB_SIZE})...")
+    # 2. Загрузка данных
+    print(f"\n📥 Загрузка данных...")
+    
+    with open(ModelConfig.DATA_PATH, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    print(f"✅ Загружено {len(data)} примеров")
+    
+    # 3. Извлечение текстов
+    print(f"\n📝 Извлечение текстов...")
+    
+    texts = []
+    for item in data:
+        texts.append(item['question'])
+        texts.append(item['answer'])
+    
+    print(f"✅ Извлечено {len(texts)} текстов")
+    
+    # 4. Построение словаря
+    print(f"\n🔨 Построение словаря...")
+    print(f"   Размер словаря: {ModelConfig.VOCAB_SIZE}")
+    
     tokenizer = SimpleTokenizer(vocab_size=ModelConfig.VOCAB_SIZE)
+    tokenizer.build_vocab(texts)
     
-    # Строим словарь
-    tokenizer.build_vocab(all_texts)
+    actual_vocab_size = tokenizer.get_vocab_size()
+    print(f"✅ Словарь построен: {actual_vocab_size} токенов")
     
-    # Создаём директорию для сохранения если не существует
+    # 5. Сохранение токенизатора
+    print(f"\n💾 Сохранение токенизатора...")
+    
+    # Создаём директорию если не существует
     os.makedirs(os.path.dirname(ModelConfig.TOKENIZER_PATH), exist_ok=True)
     
-    # Сохраняем токенизатор
     tokenizer.save(ModelConfig.TOKENIZER_PATH)
     
-    # Статистика
-    print_vocabulary_stats(tokenizer)
+    print(f"✅ Токенизатор сохранён: {ModelConfig.TOKENIZER_PATH}")
     
-    print(f"\n✅ Словарь успешно построен и сохранён!")
-    print(f"📁 Файл: {ModelConfig.TOKENIZER_PATH}")
-    print(f"📚 Размер словаря: {tokenizer.get_vocab_size()} слов")
-    print(f"\n💡 Теперь можно обучать модель!")
+    # 6. Статистика
+    print("\n" + "=" * 70)
+    print("СТАТИСТИКА СЛОВАРЯ")
+    print("=" * 70)
+    print(f"📊 Размер словаря: {actual_vocab_size}")
+    print(f"📊 Специальные токены:")
+    print(f"   <PAD>: {tokenizer.word2idx.get('<PAD>', 'не найден')}")
+    print(f"   <UNK>: {tokenizer.word2idx.get('<UNK>', 'не найден')}")
+    print(f"   <SOS>: {tokenizer.word2idx.get('<SOS>', 'не найден')}")
+    print(f"   <EOS>: {tokenizer.word2idx.get('<EOS>', 'не найден')}")
+    
+    # Топ слов
+    print(f"\n📈 Топ-20 самых частых слов:")
+    
+    # Получаем топ слова (кроме специальных токенов)
+    word_freq = {}
+    for text in texts:
+        words = tokenizer.tokenize(text)
+        for word in words:
+            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>']:
+                word_freq[word] = word_freq.get(word, 0) + 1
+    
+    top_words = sorted(word_freq.items(), key=lambda x: -x[1])[:20]
+    
+    for i, (word, freq) in enumerate(top_words, 1):
+        print(f"   {i:2d}. {word:20s} ({freq:4d} раз)")
+    
+    # Примеры токенизации
+    print(f"\n📝 Примеры токенизации:")
+    
+    test_sentences = [
+        "Сколько стоит обучение?",
+        "Какие документы нужны для поступления?",
+        "Есть ли бюджетные места?"
+    ]
+    
+    for sent in test_sentences:
+        tokens = tokenizer.encode(sent, add_sos=True, add_eos=True)
+        decoded = tokenizer.decode(tokens, skip_special=True)
+        
+        print(f"\n   Исходный: {sent}")
+        print(f"   Токены: {tokens[:15]}..." if len(tokens) > 15 else f"   Токены: {tokens}")
+        print(f"   Длина: {len(tokens)}")
+        print(f"   Декодированный: {decoded}")
+    
+    print("\n" + "=" * 70)
+    print("✅ ПОСТРОЕНИЕ СЛОВАРЯ ЗАВЕРШЕНО")
+    print("=" * 70)
+    print(f"\n📌 Следующий шаг:")
+    print(f"   python scripts/train_model.py")
+    print("=" * 70 + "\n")
 
 
 if __name__ == "__main__":
-    main()
+    build_vocabulary()
