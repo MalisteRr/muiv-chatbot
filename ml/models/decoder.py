@@ -52,15 +52,12 @@ class Attention(nn.Module):
         seq_length = encoder_outputs.size(1)
         
         # Повторяем hidden для каждого временного шага
-        # hidden: (batch_size, hidden_size) -> (batch_size, seq_length, hidden_size)
         hidden = hidden.unsqueeze(1).repeat(1, seq_length, 1)
         
         # Конкатенируем hidden и encoder_outputs
-        # (batch_size, seq_length, hidden_size * 2)
         energy = torch.tanh(self.attn(torch.cat([hidden, encoder_outputs], dim=2)))
         
         # Вычисляем скоры внимания
-        # (batch_size, seq_length, 1) -> (batch_size, seq_length)
         attention = self.v(energy).squeeze(2)
         
         # Применяем softmax для получения вероятностей
@@ -69,43 +66,106 @@ class Attention(nn.Module):
         return attention_weights
 
 
+class Decoder(nn.Module):
+    """
+    Decoder на основе LSTM с механизмом внимания
+    
+    Генерирует ответ по одному слову за раз,
+    используя контекст от encoder'а и предыдущие сгенерированные слова.
+    """
+    
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int = 256,
+        hidden_size: int = 512,
+        num_layers: int = 2,
+        dropout: float = 0.3,
+        use_attention: bool = True
+    ):
+        """
+        Инициализация Decoder
+        
+        Args:
+            vocab_size: Размер словаря
+            embedding_dim: Размерность эмбеддингов
+            hidden_size: Размер скрытого слоя
+            num_layers: Количество слоёв LSTM
+            dropout: Вероятность dropout
+            use_attention: Использовать ли механизм внимания
+        """
+        super(Decoder, self).__init__()
+        
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.use_attention = use_attention
+        
+        # Слой эмбеддингов
+        self.embedding = nn.Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=embedding_dim,
+            padding_idx=0
+        )
+        
+        # LSTM слой
+        # Если есть attention, входной размер увеличивается
+        lstm_input_size = embedding_dim + hidden_size if use_attention else embedding_dim
+        
+        self.lstm = nn.LSTM(
+            input_size=lstm_input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True
+        )
+        
+        # Механизм внимания (опционально)
+        if use_attention:
+            self.attention = Attention(hidden_size)
+        
+        # Выходной слой (преобразование в распределение по словарю)
+        fc_input_size = hidden_size * 2 if use_attention else hidden_size
+        self.fc = nn.Linear(fc_input_size, vocab_size)
+        
+        # Dropout
+        self.dropout_layer = nn.Dropout(dropout)
+
+
 if __name__ == "__main__":
     """
-    Тестирование Attention
+    Тестирование базового Decoder
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ ATTENTION")
+    print("ТЕСТ DECODER - Базовая структура")
     print("=" * 60)
     
     # Параметры
+    vocab_size = 5000
+    embedding_dim = 256
     hidden_size = 512
-    batch_size = 4
-    seq_length = 20
+    num_layers = 2
     
-    # Создаём Attention
-    attention = Attention(hidden_size)
+    # Создаём Decoder с attention
+    decoder = Decoder(
+        vocab_size=vocab_size,
+        embedding_dim=embedding_dim,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        dropout=0.3,
+        use_attention=True
+    )
     
-    print(f"✅ Attention создан:")
+    print(f"✅ Decoder создан:")
+    print(f"   Vocab size: {vocab_size}")
+    print(f"   Embedding dim: {embedding_dim}")
     print(f"   Hidden size: {hidden_size}")
-    
-    # Тестовые данные
-    test_hidden = torch.randn(batch_size, hidden_size)
-    test_encoder_outputs = torch.randn(batch_size, seq_length, hidden_size)
-    
-    print(f"\n🧪 Тестовый вход:")
-    print(f"   Hidden форма: {test_hidden.shape}")
-    print(f"   Encoder outputs форма: {test_encoder_outputs.shape}")
-    
-    # Прямой проход
-    with torch.no_grad():
-        attention_weights = attention(test_hidden, test_encoder_outputs)
-    
-    print(f"\n📤 Выход Attention:")
-    print(f"   Attention weights форма: {attention_weights.shape}")
-    print(f"   Сумма весов (должна быть ~1.0): {attention_weights[0].sum().item():.4f}")
-    print(f"   Макс вес: {attention_weights[0].max().item():.4f}")
-    print(f"   Мин вес: {attention_weights[0].min().item():.4f}")
+    print(f"   Num layers: {num_layers}")
+    print(f"   Attention: Да")
+    print(f"\n📊 Параметров в модели: {sum(p.numel() for p in decoder.parameters()):,}")
     
     print("\n" + "=" * 60)
-    print("✅ ATTENTION РАБОТАЕТ")
+    print("✅ БАЗОВАЯ СТРУКТУРА DECODER ГОТОВА")
     print("=" * 60)
