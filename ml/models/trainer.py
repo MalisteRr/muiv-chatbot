@@ -55,7 +55,6 @@ class Trainer:
             q_lengths = q_lengths.to(self.device)
             
             self.optimizer.zero_grad()
-            
             outputs = self.model(questions, answers, q_lengths, teacher_forcing_ratio)
             
             output_dim = outputs.shape[-1]
@@ -77,15 +76,7 @@ class Trainer:
         return epoch_loss / len(dataloader)
     
     def validate(self, dataloader: DataLoader) -> float:
-        """
-        Валидация модели
-        
-        Args:
-            dataloader: DataLoader с валидационными данными
-        
-        Returns:
-            Средний loss на валидации
-        """
+        """Валидация модели"""
         self.model.eval()
         epoch_loss = 0
         
@@ -95,15 +86,8 @@ class Trainer:
                 answers = answers.to(self.device)
                 q_lengths = q_lengths.to(self.device)
                 
-                # Прямой проход (без teacher forcing)
-                outputs = self.model(
-                    questions, 
-                    answers, 
-                    q_lengths,
-                    teacher_forcing_ratio=0.0
-                )
+                outputs = self.model(questions, answers, q_lengths, teacher_forcing_ratio=0.0)
                 
-                # Вычисление loss
                 output_dim = outputs.shape[-1]
                 outputs = outputs[:, 1:].reshape(-1, output_dim)
                 answers = answers[:, 1:].reshape(-1)
@@ -122,23 +106,13 @@ class Trainer:
         save_dir: str = None,
         early_stopping_patience: int = 3
     ):
-        """
-        Полный цикл обучения
-        
-        Args:
-            train_loader: DataLoader для обучения
-            val_loader: DataLoader для валидации (опционально)
-            num_epochs: Количество эпох
-            teacher_forcing_ratio: Начальная вероятность teacher forcing
-            save_dir: Директория для сохранения чекпоинтов
-            early_stopping_patience: Терпение для early stopping
-        """
+        """Полный цикл обучения"""
         print("\n" + "=" * 60)
         print("НАЧАЛО ОБУЧЕНИЯ")
         print("=" * 60)
         print(f"Эпох: {num_epochs}")
         print(f"Устройство: {self.device}")
-        print(f"Параметров в модели: {self.model.count_parameters():,}")
+        print(f"Параметров: {self.model.count_parameters():,}")
         print("=" * 60 + "\n")
         
         for epoch in range(num_epochs):
@@ -147,39 +121,39 @@ class Trainer:
             print(f"\nЭпоха {epoch + 1}/{num_epochs}")
             print("-" * 60)
             
-            # Обучение
             train_loss = self.train_epoch(train_loader, teacher_forcing_ratio)
             self.train_losses.append(train_loss)
             
-            # Валидация
             if val_loader:
                 val_loss = self.validate(val_loader)
                 self.val_losses.append(val_loss)
                 
-                print(f"\n📊 Результаты эпохи {epoch + 1}:")
+                print(f"\n📊 Результаты:")
                 print(f"   Train Loss: {train_loss:.4f}")
                 print(f"   Val Loss: {val_loss:.4f}")
                 
-                # Проверка улучшения
                 if val_loss < self.best_val_loss - TrainingConfig.MIN_DELTA:
                     self.best_val_loss = val_loss
                     self.patience_counter = 0
+                    
+                    if save_dir:
+                        self.save_checkpoint(save_dir, epoch, train_loss, val_loss, is_best=True)
                     print(f"   ✅ Новая лучшая модель! Val Loss: {val_loss:.4f}")
                 else:
                     self.patience_counter += 1
                     print(f"   ⚠️ Нет улучшения ({self.patience_counter}/{early_stopping_patience})")
                 
-                # Early stopping
                 if self.patience_counter >= early_stopping_patience:
-                    print(f"\n⛔ Early stopping! Нет улучшения {early_stopping_patience} эпох.")
+                    print(f"\n⛔ Early stopping!")
                     break
             else:
                 print(f"\n📊 Train Loss: {train_loss:.4f}")
+                
+                if save_dir and (epoch + 1) % TrainingConfig.SAVE_EVERY == 0:
+                    self.save_checkpoint(save_dir, epoch, train_loss, None)
             
-            # Уменьшаем teacher forcing со временем
             teacher_forcing_ratio *= 0.95
             
-            # Время эпохи
             epoch_time = time.time() - start_time
             print(f"   ⏱️ Время: {epoch_time:.2f} сек")
         
@@ -188,6 +162,68 @@ class Trainer:
         print("=" * 60)
         print(f"Лучший Val Loss: {self.best_val_loss:.4f}")
         print("=" * 60 + "\n")
+    
+    def save_checkpoint(
+        self,
+        save_dir: str,
+        epoch: int,
+        train_loss: float,
+        val_loss: Optional[float] = None,
+        is_best: bool = False
+    ):
+        """
+        Сохранение чекпоинта модели
+        
+        Args:
+            save_dir: Директория для сохранения
+            epoch: Номер эпохи
+            train_loss: Train loss
+            val_loss: Validation loss
+            is_best: Лучшая ли это модель
+        """
+        os.makedirs(save_dir, exist_ok=True)
+        
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'train_loss': train_loss,
+            'val_loss': val_loss,
+            'train_losses': self.train_losses,
+            'val_losses': self.val_losses
+        }
+        
+        if is_best:
+            path = os.path.join(save_dir, 'best_model.pt')
+        else:
+            path = os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pt')
+        
+        torch.save(checkpoint, path)
+        print(f"   💾 Чекпоинт сохранён: {path}")
+    
+    def load_checkpoint(self, checkpoint_path: str):
+        """
+        Загрузка чекпоинта
+        
+        Args:
+            checkpoint_path: Путь к чекпоинту
+        """
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.train_losses = checkpoint.get('train_losses', [])
+        self.val_losses = checkpoint.get('val_losses', [])
+        
+        epoch = checkpoint['epoch']
+        train_loss = checkpoint['train_loss']
+        val_loss = checkpoint.get('val_loss')
+        
+        print(f"✅ Чекпоинт загружен: {checkpoint_path}")
+        print(f"   Эпоха: {epoch + 1}")
+        print(f"   Train Loss: {train_loss:.4f}")
+        if val_loss:
+            print(f"   Val Loss: {val_loss:.4f}")
 
 
 def create_trainer(model: Seq2Seq, learning_rate: float = 0.001, device: str = 'cpu') -> Trainer:
@@ -208,22 +244,22 @@ def create_trainer(model: Seq2Seq, learning_rate: float = 0.001, device: str = '
 
 if __name__ == "__main__":
     """
-    Тестирование validate и train
+    Тестирование save/load checkpoint
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ TRAINER - validate и train")
+    print("ТЕСТ TRAINER - Сохранение и загрузка")
     print("=" * 60)
     
     print("✅ Методы добавлены:")
-    print("   - validate(): валидация модели")
-    print("   - train(): полный цикл обучения")
-    print("\n📊 Функции train():")
-    print("   - Обучение на каждой эпохе")
-    print("   - Валидация после каждой эпохи")
-    print("   - Early stopping")
-    print("   - Уменьшение teacher forcing")
-    print("   - Логирование прогресса")
+    print("   - save_checkpoint(): сохранение модели")
+    print("   - load_checkpoint(): загрузка модели")
+    print("\n💾 Что сохраняется:")
+    print("   - Веса модели (model_state_dict)")
+    print("   - Состояние оптимизатора")
+    print("   - Номер эпохи")
+    print("   - Train/Val losses")
+    print("   - История обучения")
     
     print("\n" + "=" * 60)
-    print("✅ VALIDATE И TRAIN ГОТОВЫ")
+    print("✅ TRAINER ПОЛНОСТЬЮ ГОТОВ")
     print("=" * 60)
