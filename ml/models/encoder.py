@@ -66,14 +66,69 @@ class Encoder(nn.Module):
         
         # Dropout для эмбеддингов
         self.dropout_layer = nn.Dropout(dropout)
+    
+    def forward(self, input_seq, input_lengths=None):
+        """
+        Прямой проход через Encoder
+        
+        Args:
+            input_seq: Входная последовательность индексов
+                       Форма: (batch_size, seq_length)
+            input_lengths: Реальные длины последовательностей (опционально)
+                          Форма: (batch_size,)
+        
+        Returns:
+            outputs: Выходы LSTM для каждого временного шага
+                    Форма: (batch_size, seq_length, hidden_size)
+            hidden: Скрытое состояние последнего слоя
+                   Форма: (num_layers, batch_size, hidden_size)
+            cell: Состояние ячейки последнего слоя
+                 Форма: (num_layers, batch_size, hidden_size)
+        """
+        # 1. Преобразуем индексы в эмбеддинги
+        # input_seq: (batch_size, seq_length)
+        # embedded: (batch_size, seq_length, embedding_dim)
+        embedded = self.embedding(input_seq)
+        
+        # 2. Применяем dropout к эмбеддингам
+        embedded = self.dropout_layer(embedded)
+        
+        # 3. Если есть реальные длины - используем pack_padded_sequence
+        # Это позволяет LSTM игнорировать паддинг
+        if input_lengths is not None:
+            # Упаковываем последовательности
+            packed = nn.utils.rnn.pack_padded_sequence(
+                embedded, 
+                input_lengths.cpu(), 
+                batch_first=True, 
+                enforce_sorted=False
+            )
+            
+            # Пропускаем через LSTM
+            packed_outputs, (hidden, cell) = self.lstm(packed)
+            
+            # Распаковываем обратно
+            outputs, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_outputs, 
+                batch_first=True
+            )
+        else:
+            # Обычный проход без упаковки
+            outputs, (hidden, cell) = self.lstm(embedded)
+        
+        # outputs: (batch_size, seq_length, hidden_size)
+        # hidden: (num_layers, batch_size, hidden_size)
+        # cell: (num_layers, batch_size, hidden_size)
+        
+        return outputs, hidden, cell
 
 
 if __name__ == "__main__":
     """
-    Тестирование базовой структуры Encoder
+    Тестирование Encoder с методом forward
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ ENCODER - Базовая структура")
+    print("ТЕСТ ENCODER - Метод forward")
     print("=" * 60)
     
     # Параметры
@@ -81,6 +136,8 @@ if __name__ == "__main__":
     embedding_dim = 256
     hidden_size = 512
     num_layers = 2
+    batch_size = 4
+    seq_length = 20
     
     # Создаём Encoder
     encoder = Encoder(
@@ -98,6 +155,24 @@ if __name__ == "__main__":
     print(f"   Num layers: {num_layers}")
     print(f"\n📊 Параметров в модели: {sum(p.numel() for p in encoder.parameters()):,}")
     
+    # Тестовые данные
+    test_input = torch.randint(0, vocab_size, (batch_size, seq_length))
+    test_lengths = torch.tensor([20, 18, 15, 12])
+    
+    print(f"\n🧪 Тестовый вход:")
+    print(f"   Форма: {test_input.shape}")
+    print(f"   Длины: {test_lengths.tolist()}")
+    
+    # Прямой проход
+    encoder.eval()
+    with torch.no_grad():
+        outputs, hidden, cell = encoder(test_input, test_lengths)
+    
+    print(f"\n📤 Выход Encoder:")
+    print(f"   Outputs форма: {outputs.shape}")
+    print(f"   Hidden форма: {hidden.shape}")
+    print(f"   Cell форма: {cell.shape}")
+    
     print("\n" + "=" * 60)
-    print("✅ БАЗОВАЯ СТРУКТУРА ГОТОВА")
+    print("✅ МЕТОД FORWARD РАБОТАЕТ")
     print("=" * 60)
