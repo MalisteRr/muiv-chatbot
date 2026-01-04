@@ -35,16 +35,6 @@ class Trainer:
         device: str = 'cpu',
         grad_clip: float = 5.0
     ):
-        """
-        Инициализация Trainer
-        
-        Args:
-            model: Seq2Seq модель
-            optimizer: Оптимизатор (Adam, SGD и т.д.)
-            criterion: Функция потерь (CrossEntropyLoss)
-            device: Устройство (cpu или cuda)
-            grad_clip: Максимальное значение градиента (для стабильности)
-        """
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
@@ -58,6 +48,74 @@ class Trainer:
         
         # Для early stopping
         self.patience_counter = 0
+    
+    def train_epoch(
+        self, 
+        dataloader: DataLoader,
+        teacher_forcing_ratio: float = 0.5
+    ) -> float:
+        """
+        Обучение на одной эпохе
+        
+        Args:
+            dataloader: DataLoader с обучающими данными
+            teacher_forcing_ratio: Вероятность использования teacher forcing
+        
+        Returns:
+            Средний loss за эпоху
+        """
+        self.model.train()
+        epoch_loss = 0
+        
+        for batch_idx, (questions, answers, q_lengths, a_lengths) in enumerate(dataloader):
+            # Переносим на устройство
+            questions = questions.to(self.device)
+            answers = answers.to(self.device)
+            q_lengths = q_lengths.to(self.device)
+            
+            # Обнуляем градиенты
+            self.optimizer.zero_grad()
+            
+            # Прямой проход
+            outputs = self.model(
+                questions, 
+                answers, 
+                q_lengths,
+                teacher_forcing_ratio
+            )
+            
+            # Вычисление loss
+            # outputs: (batch_size, trg_len, vocab_size)
+            # answers: (batch_size, trg_len)
+            
+            # Убираем первый токен из ответов (<SOS>)
+            output_dim = outputs.shape[-1]
+            
+            # Reshape для вычисления loss
+            outputs = outputs[:, 1:].reshape(-1, output_dim)
+            answers = answers[:, 1:].reshape(-1)
+            
+            # Вычисляем loss (игнорируем padding токены)
+            loss = self.criterion(outputs, answers)
+            
+            # Обратное распространение
+            loss.backward()
+            
+            # Gradient clipping (обрезка градиентов)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            
+            # Обновление весов
+            self.optimizer.step()
+            
+            # Накапливаем loss
+            epoch_loss += loss.item()
+            
+            # Логирование
+            if (batch_idx + 1) % TrainingConfig.LOG_EVERY == 0:
+                avg_loss = epoch_loss / (batch_idx + 1)
+                print(f"   Batch {batch_idx + 1}/{len(dataloader)} | Loss: {avg_loss:.4f}")
+        
+        return epoch_loss / len(dataloader)
 
 
 def create_trainer(
@@ -65,25 +123,10 @@ def create_trainer(
     learning_rate: float = 0.001,
     device: str = 'cpu'
 ) -> Trainer:
-    """
-    Фабричная функция для создания Trainer
-    
-    Args:
-        model: Seq2Seq модель
-        learning_rate: Скорость обучения
-        device: Устройство
-    
-    Returns:
-        Настроенный Trainer
-    """
-    # Оптимизатор (Adam)
+    """Фабричная функция для создания Trainer"""
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
-    # Функция потерь (CrossEntropyLoss)
-    # ignore_index=0 - игнорируем PAD токены
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     
-    # Создаём Trainer
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
@@ -97,29 +140,20 @@ def create_trainer(
 
 if __name__ == "__main__":
     """
-    Тестирование базовой структуры Trainer
+    Тестирование train_epoch
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ TRAINER - Базовая структура")
+    print("ТЕСТ TRAINER - train_epoch")
     print("=" * 60)
     
-    from .encoder import Encoder
-    from .decoder import Decoder
-    
-    # Создаём модель
-    encoder = Encoder(vocab_size=5000)
-    decoder = Decoder(vocab_size=5000, use_attention=True)
-    model = Seq2Seq(encoder, decoder, device='cpu')
-    
-    # Создаём trainer
-    trainer = create_trainer(model, learning_rate=0.001, device='cpu')
-    
-    print(f"✅ Trainer создан:")
-    print(f"   Оптимизатор: Adam")
-    print(f"   Learning rate: 0.001")
-    print(f"   Criterion: CrossEntropyLoss")
-    print(f"   Grad clip: 5.0")
+    print("✅ Метод train_epoch добавлен")
+    print("\nВыполняет:")
+    print("1. Прямой проход через модель")
+    print("2. Вычисление loss")
+    print("3. Обратное распространение")
+    print("4. Gradient clipping")
+    print("5. Обновление весов")
     
     print("\n" + "=" * 60)
-    print("✅ БАЗОВАЯ СТРУКТУРА TRAINER ГОТОВА")
+    print("✅ TRAIN_EPOCH ГОТОВ")
     print("=" * 60)
