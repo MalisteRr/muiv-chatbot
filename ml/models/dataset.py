@@ -18,16 +18,9 @@ from .config import ModelConfig
 
 
 class QADataset(Dataset):
-    """
-    Dataset для пар вопрос-ответ
-    """
+    """Dataset для пар вопрос-ответ"""
     
-    def __init__(
-        self,
-        data_path: str,
-        tokenizer: SimpleTokenizer,
-        max_length: int = 100
-    ):
+    def __init__(self, data_path: str, tokenizer: SimpleTokenizer, max_length: int = 100):
         self.tokenizer = tokenizer
         self.max_length = max_length
         
@@ -45,17 +38,10 @@ class QADataset(Dataset):
         answer = item['answer']
         
         question_indices = self.tokenizer.encode(
-            question,
-            max_length=self.max_length,
-            add_sos=False,
-            add_eos=True
+            question, max_length=self.max_length, add_sos=False, add_eos=True
         )
-        
         answer_indices = self.tokenizer.encode(
-            answer,
-            max_length=self.max_length,
-            add_sos=True,
-            add_eos=True
+            answer, max_length=self.max_length, add_sos=True, add_eos=True
         )
         
         question_length = sum(1 for idx in question_indices if idx != 0)
@@ -70,28 +56,14 @@ class QADataset(Dataset):
 
 
 def collate_fn(batch):
-    """
-    Функция для объединения примеров в батч
-    
-    Args:
-        batch: Список примеров (вопрос, ответ, длины)
-    
-    Returns:
-        questions: Батч вопросов (batch_size, max_seq_len)
-        answers: Батч ответов (batch_size, max_seq_len)
-        question_lengths: Длины вопросов (batch_size,)
-        answer_lengths: Длины ответов (batch_size,)
-    """
-    # Распаковываем батч
+    """Функция для объединения примеров в батч"""
     questions, answers, q_lengths, a_lengths = zip(*batch)
     
-    # Стекаем в тензоры
     questions = torch.stack(questions)
     answers = torch.stack(answers)
     question_lengths = torch.LongTensor(q_lengths)
     answer_lengths = torch.LongTensor(a_lengths)
     
-    # Сортируем по убыванию длины вопросов (требование pack_padded_sequence)
     sorted_indices = question_lengths.argsort(descending=True)
     
     questions = questions[sorted_indices]
@@ -110,57 +82,22 @@ def create_dataloaders(
     max_length: int = 100,
     num_workers: int = 0
 ) -> Tuple[DataLoader, DataLoader]:
-    """
-    Создание DataLoader'ов для обучения и валидации
-    
-    Args:
-        train_path: Путь к обучающим данным
-        val_path: Путь к валидационным данным (опционально)
-        tokenizer: Токенизатор
-        batch_size: Размер батча
-        max_length: Максимальная длина последовательности
-        num_workers: Количество процессов для загрузки данных
-    
-    Returns:
-        train_loader: DataLoader для обучения
-        val_loader: DataLoader для валидации (или None)
-    """
-    # Загружаем токенизатор если не передан
+    """Создание DataLoader'ов для обучения и валидации"""
     if tokenizer is None:
         tokenizer = SimpleTokenizer.load(ModelConfig.TOKENIZER_PATH)
     
-    # Создаём обучающий датасет
-    train_dataset = QADataset(
-        data_path=train_path,
-        tokenizer=tokenizer,
-        max_length=max_length
-    )
-    
+    train_dataset = QADataset(train_path, tokenizer, max_length)
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-        pin_memory=True  # Ускоряет передачу на GPU
+        train_dataset, batch_size=batch_size, shuffle=True,
+        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
     )
     
-    # Создаём валидационный датасет если есть
     val_loader = None
     if val_path:
-        val_dataset = QADataset(
-            data_path=val_path,
-            tokenizer=tokenizer,
-            max_length=max_length
-        )
-        
+        val_dataset = QADataset(val_path, tokenizer, max_length)
         val_loader = DataLoader(
-            val_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=num_workers,
-            pin_memory=True
+            val_dataset, batch_size=batch_size, shuffle=False,
+            collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
         )
     
     print(f"\n📊 DataLoaders созданы:")
@@ -171,67 +108,122 @@ def create_dataloaders(
     return train_loader, val_loader
 
 
+def split_dataset(
+    data_path: str,
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+    save_splits: bool = True
+) -> Tuple[str, str, str]:
+    """
+    Разделение датасета на train/val/test
+    
+    Args:
+        data_path: Путь к полному датасету
+        train_ratio: Доля обучающих данных
+        val_ratio: Доля валидационных данных
+        test_ratio: Доля тестовых данных
+        save_splits: Сохранить ли разделённые данные
+    
+    Returns:
+        train_path: Путь к обучающим данным
+        val_path: Путь к валидационным данным
+        test_path: Путь к тестовым данным
+    """
+    import os
+    import random
+    
+    # Проверка соотношений
+    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, \
+        "Сумма соотношений должна быть 1.0"
+    
+    # Загружаем данные
+    with open(data_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Перемешиваем
+    random.shuffle(data)
+    
+    # Вычисляем размеры
+    total = len(data)
+    train_size = int(total * train_ratio)
+    val_size = int(total * val_ratio)
+    
+    # Разделяем
+    train_data = data[:train_size]
+    val_data = data[train_size:train_size + val_size]
+    test_data = data[train_size + val_size:]
+    
+    print(f"\n✂️ Датасет разделён:")
+    print(f"   Train: {len(train_data)} ({len(train_data)/total*100:.1f}%)")
+    print(f"   Val: {len(val_data)} ({len(val_data)/total*100:.1f}%)")
+    print(f"   Test: {len(test_data)} ({len(test_data)/total*100:.1f}%)")
+    
+    if save_splits:
+        # Пути для сохранения
+        base_dir = os.path.dirname(data_path)
+        train_path = os.path.join(base_dir, 'train_data.json')
+        val_path = os.path.join(base_dir, 'val_data.json')
+        test_path = os.path.join(base_dir, 'test_data.json')
+        
+        # Сохраняем
+        with open(train_path, 'w', encoding='utf-8') as f:
+            json.dump(train_data, f, ensure_ascii=False, indent=2)
+        
+        with open(val_path, 'w', encoding='utf-8') as f:
+            json.dump(val_data, f, ensure_ascii=False, indent=2)
+        
+        with open(test_path, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n💾 Файлы сохранены:")
+        print(f"   {train_path}")
+        print(f"   {val_path}")
+        print(f"   {test_path}")
+        
+        return train_path, val_path, test_path
+    
+    return None, None, None
+
+
 if __name__ == "__main__":
     """
-    Тестирование DataLoader
+    Тестирование split_dataset
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ DATALOADER")
+    print("ТЕСТ SPLIT_DATASET")
     print("=" * 60)
     
     import tempfile
     
+    # Создаём тестовый датасет
     test_data = [
-        {
-            "question": "Сколько стоит обучение?",
-            "answer": "Стоимость обучения составляет 150000 рублей в год.",
-            "category": "Стоимость"
-        },
-        {
-            "question": "Какие документы нужны?",
-            "answer": "Необходимы паспорт, аттестат и фотографии.",
-            "category": "Документы"
-        }
-    ] * 10
+        {"question": f"Вопрос {i}", "answer": f"Ответ {i}", "category": "Тест"}
+        for i in range(100)
+    ]
     
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
         json.dump(test_data, f, ensure_ascii=False)
         temp_path = f.name
     
-    # Токенизатор
-    tokenizer = SimpleTokenizer(vocab_size=1000)
-    all_texts = []
-    for item in test_data:
-        all_texts.append(item['question'])
-        all_texts.append(item['answer'])
-    tokenizer.build_vocab(all_texts)
-    
-    # Датасет
-    dataset = QADataset(temp_path, tokenizer, max_length=50)
-    
-    # DataLoader
-    dataloader = DataLoader(
-        dataset,
-        batch_size=4,
-        shuffle=True,
-        collate_fn=collate_fn
+    # Разделяем датасет
+    train_path, val_path, test_path = split_dataset(
+        temp_path,
+        train_ratio=0.8,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        save_splits=True
     )
     
-    print(f"\n📊 DataLoader создан:")
-    print(f"   Батчей: {len(dataloader)}")
+    print(f"\n✅ Датасет успешно разделён!")
     
-    # Тест батча
-    questions, answers, q_lengths, a_lengths = next(iter(dataloader))
-    
-    print(f"\n🧪 Тестовый батч:")
-    print(f"   Questions: {questions.shape}")
-    print(f"   Answers: {answers.shape}")
-    print(f"   Q lengths: {q_lengths.tolist()}")
-    print(f"   A lengths: {a_lengths.tolist()}")
-    
+    # Удаляем временные файлы
     import os
     os.remove(temp_path)
+    os.remove(train_path)
+    os.remove(val_path)
+    os.remove(test_path)
     
     print("\n" + "=" * 60)
-    print("✅ DATALOADER РАБОТАЕТ")
+    print("✅ DATASET ПОЛНОСТЬЮ ГОТОВ")
     print("=" * 60)
