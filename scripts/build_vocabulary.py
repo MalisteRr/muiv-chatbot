@@ -85,15 +85,17 @@ def build_vocabulary():
     print(f"   <SOS>: {tokenizer.word2idx.get('<SOS>', 'не найден')}")
     print(f"   <EOS>: {tokenizer.word2idx.get('<EOS>', 'не найден')}")
     
-    # Топ слов
+    # Топ слов - используем простую токенизацию
     print(f"\n📈 Топ-20 самых частых слов:")
     
     # Получаем топ слова (кроме специальных токенов)
     word_freq = {}
     for text in texts:
-        words = tokenizer.tokenize(text)
+        # Простая токенизация (разбиение по пробелам и знакам препинания)
+        import re
+        words = re.findall(r'\w+', text.lower())
         for word in words:
-            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>']:
+            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>'] and len(word) > 1:
                 word_freq[word] = word_freq.get(word, 0) + 1
     
     top_words = sorted(word_freq.items(), key=lambda x: -x[1])[:20]
