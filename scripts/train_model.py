@@ -1,0 +1,121 @@
+"""
+Скрипт обучения Seq2Seq модели
+
+Запуск обучения модели для генерации ответов на вопросы абитуриентов.
+
+Использование:
+    python scripts/train_model.py
+"""
+
+import sys
+import os
+import torch
+
+# Добавляем путь к проекту
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from ml.models import (
+    create_seq2seq_model,
+    create_dataloaders,
+    create_trainer,
+    SimpleTokenizer,
+    ModelConfig,
+    split_dataset
+)
+
+
+def check_prerequisites():
+    """
+    Проверка наличия необходимых файлов
+    
+    Returns:
+        True если всё готово к обучению
+    """
+    print(f"\n📁 Проверка данных...")
+    
+    # Проверяем датасет
+    if not os.path.exists(ModelConfig.DATA_PATH):
+        print(f"❌ Датасет не найден: {ModelConfig.DATA_PATH}")
+        print("   Запустите сначала:")
+        print("   1. python scripts/prepare_dataset.py")
+        print("   2. python scripts/build_vocabulary.py")
+        return False
+    
+    # Проверяем токенизатор
+    if not os.path.exists(ModelConfig.TOKENIZER_PATH):
+        print(f"❌ Токенизатор не найден: {ModelConfig.TOKENIZER_PATH}")
+        print("   Запустите: python scripts/build_vocabulary.py")
+        return False
+    
+    print(f"✅ Все необходимые файлы найдены")
+    return True
+
+
+def prepare_data_splits():
+    """
+    Разделение датасета на train/val/test
+    
+    Returns:
+        (train_path, val_path, test_path)
+    """
+    print(f"\n✂️ Подготовка разделения данных...")
+    
+    train_path = os.path.join(os.path.dirname(ModelConfig.DATA_PATH), 'train_data.json')
+    val_path = os.path.join(os.path.dirname(ModelConfig.DATA_PATH), 'val_data.json')
+    test_path = os.path.join(os.path.dirname(ModelConfig.DATA_PATH), 'test_data.json')
+    
+    # Проверяем существуют ли уже разделённые данные
+    if os.path.exists(train_path) and os.path.exists(val_path):
+        print(f"✅ Датасет уже разделён")
+        print(f"   Train: {train_path}")
+        print(f"   Val: {val_path}")
+        print(f"   Test: {test_path}")
+        return train_path, val_path, test_path
+    
+    # Разделяем датасет
+    print(f"   Разделение датасета на train/val/test...")
+    train_path, val_path, test_path = split_dataset(
+        ModelConfig.DATA_PATH,
+        train_ratio=0.8,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        save_splits=True
+    )
+    
+    return train_path, val_path, test_path
+
+
+def main():
+    """
+    Основная функция обучения
+    """
+    print("\n" + "=" * 70)
+    print("ОБУЧЕНИЕ SEQ2SEQ МОДЕЛИ ДЛЯ ЧАТ-БОТА МУИВ")
+    print("=" * 70)
+    
+    # 1. Определяем устройство
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"\n🖥️ Устройство: {device}")
+    if device == 'cuda':
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    
+    # 2. Проверяем prerequisites
+    if not check_prerequisites():
+        return
+    
+    # 3. Подготавливаем разделение данных
+    train_path, val_path, test_path = prepare_data_splits()
+    
+    print("\n✅ Подготовка завершена")
+    print("   Готово к обучению!")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n⚠️ Обучение прервано пользователем")
+    except Exception as e:
+        print(f"\n\n❌ Ошибка: {e}")
+        import traceback
+        traceback.print_exc()
