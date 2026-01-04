@@ -86,15 +86,12 @@ class Encoder(nn.Module):
                  Форма: (num_layers, batch_size, hidden_size)
         """
         # 1. Преобразуем индексы в эмбеддинги
-        # input_seq: (batch_size, seq_length)
-        # embedded: (batch_size, seq_length, embedding_dim)
         embedded = self.embedding(input_seq)
         
         # 2. Применяем dropout к эмбеддингам
         embedded = self.dropout_layer(embedded)
         
         # 3. Если есть реальные длины - используем pack_padded_sequence
-        # Это позволяет LSTM игнорировать паддинг
         if input_lengths is not None:
             # Упаковываем последовательности
             packed = nn.utils.rnn.pack_padded_sequence(
@@ -116,19 +113,46 @@ class Encoder(nn.Module):
             # Обычный проход без упаковки
             outputs, (hidden, cell) = self.lstm(embedded)
         
-        # outputs: (batch_size, seq_length, hidden_size)
-        # hidden: (num_layers, batch_size, hidden_size)
-        # cell: (num_layers, batch_size, hidden_size)
-        
         return outputs, hidden, cell
+    
+    def init_hidden(self, batch_size, device):
+        """
+        Инициализация скрытого состояния нулями
+        
+        Используется когда нужно явно задать начальное состояние LSTM
+        (обычно LSTM сам инициализирует нулями, но этот метод может быть полезен)
+        
+        Args:
+            batch_size: Размер батча
+            device: Устройство (CPU или CUDA)
+        
+        Returns:
+            hidden: Нулевое скрытое состояние
+                   Форма: (num_layers, batch_size, hidden_size)
+            cell: Нулевое состояние ячейки
+                 Форма: (num_layers, batch_size, hidden_size)
+        """
+        hidden = torch.zeros(
+            self.num_layers, 
+            batch_size, 
+            self.hidden_size
+        ).to(device)
+        
+        cell = torch.zeros(
+            self.num_layers, 
+            batch_size, 
+            self.hidden_size
+        ).to(device)
+        
+        return hidden, cell
 
 
 if __name__ == "__main__":
     """
-    Тестирование Encoder с методом forward
+    Тестирование Encoder с init_hidden
     """
     print("\n" + "=" * 60)
-    print("ТЕСТ ENCODER - Метод forward")
+    print("ТЕСТ ENCODER - Метод init_hidden")
     print("=" * 60)
     
     # Параметры
@@ -138,6 +162,7 @@ if __name__ == "__main__":
     num_layers = 2
     batch_size = 4
     seq_length = 20
+    device = 'cpu'
     
     # Создаём Encoder
     encoder = Encoder(
@@ -148,20 +173,20 @@ if __name__ == "__main__":
         dropout=0.3
     )
     
-    print(f"✅ Encoder создан:")
-    print(f"   Vocab size: {vocab_size}")
-    print(f"   Embedding dim: {embedding_dim}")
-    print(f"   Hidden size: {hidden_size}")
-    print(f"   Num layers: {num_layers}")
-    print(f"\n📊 Параметров в модели: {sum(p.numel() for p in encoder.parameters()):,}")
+    print(f"✅ Encoder создан")
+    
+    # Тестируем init_hidden
+    hidden, cell = encoder.init_hidden(batch_size, device)
+    
+    print(f"\n🧪 Инициализация скрытого состояния:")
+    print(f"   Hidden форма: {hidden.shape}")
+    print(f"   Cell форма: {cell.shape}")
+    print(f"   Hidden sum (должна быть 0): {hidden.sum().item()}")
+    print(f"   Cell sum (должна быть 0): {cell.sum().item()}")
     
     # Тестовые данные
     test_input = torch.randint(0, vocab_size, (batch_size, seq_length))
     test_lengths = torch.tensor([20, 18, 15, 12])
-    
-    print(f"\n🧪 Тестовый вход:")
-    print(f"   Форма: {test_input.shape}")
-    print(f"   Длины: {test_lengths.tolist()}")
     
     # Прямой проход
     encoder.eval()
@@ -174,5 +199,5 @@ if __name__ == "__main__":
     print(f"   Cell форма: {cell.shape}")
     
     print("\n" + "=" * 60)
-    print("✅ МЕТОД FORWARD РАБОТАЕТ")
+    print("✅ ENCODER ПОЛНОСТЬЮ ГОТОВ")
     print("=" * 60)
