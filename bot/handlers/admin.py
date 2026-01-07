@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
-from database.crud_ratings import get_rating_statistics, get_low_rated_messages
 
 from config import config
 from database.crud import (
@@ -16,25 +15,23 @@ from database.crud import (
     get_popular_questions,
     get_unanswered_questions,
     get_recent_users,
+    get_rating_statistics,
+    get_low_rated_messages,
     export_analytics_csv
 )
 from bot.keyboards import get_admin_keyboard
-from utils.helpers import is_admin
+from utils.auth_system import require_role  # новый декоратор
 
 logger = logging.getLogger(__name__)
 router = Router(name='admin')
 
 
+# ========== КОМАНДЫ ==========
+
 @router.message(Command("admin"))
+@require_role("admin")
 async def cmd_admin_panel(message: Message):
-    """
-    Админ-панель
-    Доступна только администраторам
-    """
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ У вас нет доступа к административной панели.")
-        return
-    
+    """Админ-панель"""
     admin_text = """🔐 **Админ-панель Бота**
 
 **Доступные команды:**
@@ -59,234 +56,180 @@ async def cmd_admin_panel(message: Message):
         parse_mode="Markdown",
         reply_markup=get_admin_keyboard()
     )
-    
     logger.info(f"Администратор {message.from_user.id} открыл админ-панель")
 
 
 @router.message(Command("stats_full"))
+@require_role("admin")
 async def cmd_full_stats(message: Message):
     """Полная статистика бота"""
-    if not is_admin(message.from_user.id):
-        return
-    
     await message.answer("⏳ Собираю статистику...")
-    
     try:
         stats = await get_total_stats()
-        
-        stats_text = f"""📊 **Полная статистика бота**
-
-**Пользователи:**
-👥 Всего: {stats['total_users']}
-🆕 Новых за сегодня: {stats['new_today']}
-📅 Новых за неделю: {stats['new_week']}
-💬 Активных за сутки: {stats['active_today']}
-
-**Сообщения:**
-📨 Всего обработано: {stats['total_messages']}
-📈 Сегодня: {stats['messages_today']}
-📊 За неделю: {stats['messages_week']}
-
-**База знаний:**
-📚 Всего вопросов в FAQ: {stats['total_faq']}
-✅ Категорий: {stats['total_categories']}
-🏷️ Уникальных keywords: {stats['total_keywords']}
-
-**Эффективность:**
-✅ Найдено ответов: {stats['found_answers']} ({stats['success_rate']:.1f}%)
-❌ Не найдено: {stats['not_found']} ({100 - stats['success_rate']:.1f}%)
-⭐ Средняя оценка: {stats['avg_rating']:.2f}/5
-
-**Система:**
-🤖 AI модель: {config.ai.model}
-💾 База данных: PostgreSQL
-⚡ Uptime: {stats['uptime']}
-
-_Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}_"""
-        
-        await message.answer(stats_text, parse_mode="Markdown")
-        
+        import html
+        stats_text = (
+            "<b>📊 Полная статистика бота</b>\n\n"
+            f"<b>Пользователи:</b>\n"
+            f"👥 Всего: {html.escape(str(stats.get('total_users', 'N/A')))}\n"
+            f"🆕 Новых за сегодня: {html.escape(str(stats.get('new_today', 'N/A')))}\n"
+            f"📅 Новых за неделю: {html.escape(str(stats.get('new_week', 'N/A')))}\n"
+            f"💬 Активных за сутки: {html.escape(str(stats.get('active_today', 'N/A')))}\n\n"
+            f"<b>Сообщения:</b>\n"
+            f"📨 Всего обработано: {html.escape(str(stats.get('total_messages', 'N/A')))}\n"
+            f"📈 Сегодня: {html.escape(str(stats.get('messages_today', 'N/A')))}\n"
+            f"📊 За неделю: {html.escape(str(stats.get('messages_week', 'N/A')))}\n\n"
+            f"<b>База знаний:</b>\n"
+            f"📚 Всего вопросов в FAQ: {html.escape(str(stats.get('total_faq', 'N/A')))}\n"
+            f"✅ Категорий: {html.escape(str(stats.get('total_categories', 'N/A')))}\n"
+            f"🏷️ Уникальных keywords: {html.escape(str(stats.get('total_keywords', 'N/A')))}\n\n"
+            f"<b>Эффективность:</b>\n"
+            f"✅ Найдено ответов: {html.escape(str(stats.get('found_answers', 'N/A')))} ({html.escape(str(round(stats.get('success_rate', 0), 1)))}%)\n"
+            f"❌ Не найдено: {html.escape(str(stats.get('not_found', 'N/A')))} ({html.escape(str(round(100 - stats.get('success_rate', 0), 1)))}%)\n"
+            f"⭐ Средняя оценка: {html.escape(str(round(stats.get('avg_rating', 0), 2)))} /5\n\n"
+            f"<b>Система:</b>\n"
+            f"🤖 AI модель: {html.escape(str(getattr(config.ai, 'model', 'N/A')))}\n"
+            f"💾 База данных: PostgreSQL\n"
+            f"⚡ Uptime: {html.escape(str(stats.get('uptime', 'N/A')))}\n\n"
+            f"<i>Обновлено: {html.escape(datetime.now().strftime('%d.%m.%Y %H:%M'))}</i>"
+        )
+        await message.answer(stats_text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении статистики")
 
 
 @router.message(Command("analytics"))
+@require_role("admin")
 async def cmd_analytics(message: Message):
     """Аналитика за период"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    # TODO: Добавить выбор периода (сегодня/неделя/месяц)
-    # Пока показываем за последние 7 дней
-    
     try:
         from database.crud import get_analytics_by_period
-        
         end_date = datetime.now()
         start_date = end_date - timedelta(days=7)
-        
         analytics = await get_analytics_by_period(start_date, end_date)
-        
-        analytics_text = f"""📈 **Аналитика за последние 7 дней**
-
-**Активность по дням:**
-{analytics['daily_activity']}
-
-**Топ-5 категорий:**
-{analytics['top_categories']}
-
-**Пиковые часы:**
-{analytics['peak_hours']}
-
-**Конверсия:**
-Успешных ответов: {analytics['conversion_rate']:.1f}%
-Среднее время ответа: {analytics['avg_response_time']:.2f}с
-
-**Удовлетворенность:**
-😊 Положительных: {analytics['positive_feedback']}%
-😐 Нейтральных: {analytics['neutral_feedback']}%
-😔 Негативных: {analytics['negative_feedback']}%"""
-        
-        await message.answer(analytics_text, parse_mode="Markdown")
-        
+        import html
+        analytics_text = (
+            "<b>📈 Аналитика за последние 7 дней</b>\n\n"
+            f"<b>Активность по дням:</b>\n{html.escape(str(analytics.get('daily_activity', 'N/A')))}\n\n"
+            f"<b>Топ-5 категорий:</b>\n{html.escape(str(analytics.get('top_categories', 'N/A')))}\n\n"
+            f"<b>Пиковые часы:</b>\n{html.escape(str(analytics.get('peak_hours', 'N/A')))}\n\n"
+            f"<b>Конверсия:</b>\nУспешных ответов: {html.escape(str(round(analytics.get('conversion_rate', 0), 1)))}%\n"
+            f"Среднее время ответа: {html.escape(str(round(analytics.get('avg_response_time', 0), 2)))}с\n\n"
+            f"<b>Удовлетворенность:</b>\n😊 Положительных: {html.escape(str(analytics.get('positive_feedback', 'N/A')))}%\n"
+            f"😐 Нейтральных: {html.escape(str(analytics.get('neutral_feedback', 'N/A')))}%\n"
+            f"😔 Негативных: {html.escape(str(analytics.get('negative_feedback', 'N/A')))}%"
+        )
+        await message.answer(analytics_text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка аналитики: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении аналитики")
 
 
 @router.message(Command("popular"))
+@require_role("admin")
 async def cmd_popular_questions(message: Message):
     """Популярные вопросы"""
-    if not is_admin(message.from_user.id):
-        return
-    
     try:
         popular = await get_popular_questions(limit=10)
-        
         if not popular:
             await message.answer("📊 Статистика вопросов пока пуста")
             return
-        
-        text = "🔥 **Топ-10 популярных вопросов:**\n\n"
-        
+        import html
+        text = "<b>🔥 Топ-10 популярных вопросов:</b>\n\n"
         for i, item in enumerate(popular, 1):
-            text += f"{i}. `{item['question'][:60]}...`\n"
-            text += f"   Спрашивали: {item['count']} раз\n"
-            text += f"   Категория: {item['category']}\n\n"
-        
-        await message.answer(text, parse_mode="Markdown")
-        
+            q = html.escape(str(item.get('question', ''))[:60])
+            count = html.escape(str(item.get('count', '0')))
+            category = html.escape(str(item.get('category', '')))
+            text += f"{i}. <code>{q}...</code>\n"
+            text += f"   Спрашивали: {count} раз\n"
+            text += f"   Категория: {category}\n\n"
+        await message.answer(text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка получения популярных вопросов: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении данных")
 
 
 @router.message(Command("unanswered"))
+@require_role("admin")
 async def cmd_unanswered_questions(message: Message):
     """Вопросы без ответов"""
-    if not is_admin(message.from_user.id):
-        return
-    
     try:
         unanswered = await get_unanswered_questions(limit=20)
-        
         if not unanswered:
             await message.answer("✅ Все вопросы успешно обработаны!")
             return
-        
-        text = "❌ **Вопросы без ответа в базе знаний:**\n\n"
-        text += "_Эти вопросы нужно добавить в FAQ_\n\n"
-        
+        import html
+        text = "<b>❌ Вопросы без ответа в базе знаний:</b>\n\n<i>Эти вопросы нужно добавить в FAQ</i>\n\n"
         for i, item in enumerate(unanswered, 1):
-            text += f"{i}. `{item['question'][:70]}...`\n"
-            text += f"   Дата: {item['timestamp']}\n"
-            text += f"   Пользователь: {item['user_id']}\n\n"
-            
-            if i >= 10:  # Ограничим вывод
-                text += f"_...и еще {len(unanswered) - 10} вопросов_"
+            q = html.escape(str(item.get('question', ''))[:70])
+            timestamp = html.escape(str(item.get('timestamp', '')))
+            user_id = html.escape(str(item.get('user_id', '')))
+            text += f"{i}. <code>{q}...</code>\n"
+            text += f"   Дата: {timestamp}\n"
+            text += f"   Пользователь: {user_id}\n\n"
+            if i >= 10:
+                text += f"<i>...и еще {len(unanswered) - 10} вопросов</i>"
                 break
-        
-        await message.answer(text, parse_mode="Markdown")
-        
+        await message.answer(text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка получения необработанных вопросов: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении данных")
 
 
 @router.message(Command("users"))
+@require_role("admin")
 async def cmd_recent_users(message: Message):
     """Список последних пользователей"""
-    if not is_admin(message.from_user.id):
-        return
-    
     try:
         users = await get_recent_users(limit=15)
-        
         if not users:
             await message.answer("👥 Список пользователей пуст")
             return
-        
-        text = "👥 **Последние пользователи:**\n\n"
-        
+        import html
+        text = "<b>👥 Последние пользователи:</b>\n\n"
         for user in users:
-            status = "🟢" if user['is_active'] else "⚪"
-            text += f"{status} `{user['user_id']}` - {user['name']}\n"
-            text += f"   Сообщений: {user['messages_count']}\n"
-            text += f"   Последнее: {user['last_activity']}\n\n"
-        
-        await message.answer(text, parse_mode="Markdown")
-        
+            status = "🟢" if user.get('is_active') else "⚪"
+            user_id = html.escape(str(user.get('user_id', 'N/A')))
+            name = html.escape(str(user.get('name', '')))
+            messages_count = html.escape(str(user.get('messages_count', 0)))
+            last_activity = html.escape(str(user.get('last_activity', 'N/A')))
+            text += f"{status} <code>{user_id}</code> - {name}\n"
+            text += f"   Сообщений: {messages_count}\n"
+            text += f"   Последнее: {last_activity}\n\n"
+        await message.answer(text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка получения пользователей: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении данных")
 
 
 @router.message(Command("export"))
+@require_role("admin")
 async def cmd_export_data(message: Message):
     """Экспорт данных в CSV"""
-    if not is_admin(message.from_user.id):
-        return
-    
     await message.answer("⏳ Формирую отчет...")
-    
     try:
-        # Экспорт аналитики в CSV
         csv_data = await export_analytics_csv()
-        
         if csv_data:
-            # Отправка файла
             from aiogram.types import BufferedInputFile
-            
             filename = f"muiv_bot_analytics_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-            file = BufferedInputFile(csv_data.encode('utf-8'), filename=filename)
-            
-            await message.answer_document(
-                document=file,
-                caption="📊 Отчет по аналитике бота"
-            )
+            file_bytes = csv_data.encode('utf-8-sig')
+            file = BufferedInputFile(file_bytes, filename=filename)
+            await message.answer_document(document=file, caption="📊 Отчет по аналитике бота")
         else:
             await message.answer("❌ Нет данных для экспорта")
-        
     except Exception as e:
         logger.error(f"Ошибка экспорта данных: {e}", exc_info=True)
         await message.answer("❌ Ошибка при экспорте данных")
 
 
 @router.message(Command("reload_kb"))
+@require_role("admin")
 async def cmd_reload_knowledge_base(message: Message):
     """Перезагрузка базы знаний"""
-    if not is_admin(message.from_user.id):
-        return
-    
     await message.answer("⏳ Перезагружаю базу знаний...")
-    
     try:
-        # TODO: Реализовать перезагрузку кэша/индекса FAQ
         from ml.knowledge_base import reload_knowledge_base
-        
         result = await reload_knowledge_base()
-        
         if result['success']:
             await message.answer(
                 f"✅ База знаний перезагружена!\n\n"
@@ -294,91 +237,57 @@ async def cmd_reload_knowledge_base(message: Message):
                 f"🏷️ Категорий: {result['categories']}"
             )
         else:
-            await message.answer(f"❌ Ошибка: {result['error']}")
-        
+            import html
+            await message.answer("❌ Ошибка: " + html.escape(str(result.get('error', ''))), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка перезагрузки базы знаний: {e}", exc_info=True)
         await message.answer("❌ Ошибка при перезагрузке")
 
 
 @router.message(Command("broadcast"))
+@require_role("admin")
 async def cmd_broadcast(message: Message):
     """Рассылка сообщения всем пользователям"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    # TODO: Реализовать механизм рассылки
     await message.answer(
-        "📢 **Рассылка сообщений**\n\n"
+        "📢 <b>Рассылка сообщений</b>\n\n"
         "Эта функция в разработке.\n"
         "Для рассылки используйте команду:\n"
-        "`/broadcast_send <текст сообщения>`",
-        parse_mode="Markdown"
+        "<code>/broadcast_send &lt;текст сообщения&gt;</code>",
+        parse_mode="HTML"
     )
 
 
 @router.message(Command("debug"))
+@require_role("admin")
 async def cmd_toggle_debug(message: Message):
     """Переключение режима отладки"""
-    if not is_admin(message.from_user.id):
-        return
-    
     config.debug = not config.debug
-    
     status = "включен" if config.debug else "выключен"
     emoji = "🔍" if config.debug else "🔒"
-    
-    await message.answer(
-        f"{emoji} Режим отладки **{status}**",
-        parse_mode="Markdown"
-    )
-    
+    import html
+    await message.answer(f"{emoji} Режим отладки <b>{html.escape(status)}</b>", parse_mode="HTML")
     logger.info(f"Режим отладки переключен: {config.debug}")
-    
-
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.filters import Command
-from database.crud_ratings import get_rating_statistics, get_low_rated_messages
-import logging
-
-
-logger = logging.getLogger(__name__)
 
 
 @router.message(Command("ratings"))
+@require_role("admin")
 async def cmd_ratings_stats(message: Message):
-    """
-    Статистика по рейтингам ответов
-    Команда: /ratings [days]
-    """
-    if not is_admin(message.from_user.id):
-        return
-    
+    """Статистика по рейтингам ответов"""
     try:
-        # Получить период из команды (по умолчанию 7 дней)
         args = message.text.split()
         days = int(args[1]) if len(args) > 1 and args[1].isdigit() else 7
-        
-        # Получить статистику
         stats = await get_rating_statistics(days=days)
-        
         if not stats or stats['total_ratings'] == 0:
             await message.answer(f"📊 Нет оценок за последние {days} дней")
             return
-        
-        # Формирование ответа
         total = stats['total_ratings']
         avg = stats['avg_rating']
         positive = stats['positive']
         negative = stats['negative']
         neutral = total - positive - negative
-        
-        # Процентные показатели
         positive_pct = (positive / total * 100) if total > 0 else 0
         negative_pct = (negative / total * 100) if total > 0 else 0
         neutral_pct = (neutral / total * 100) if total > 0 else 0
-        
         text = f"""📊 <b>Статистика рейтингов за {days} дней</b>
 
 📈 <b>Общая статистика:</b>
@@ -389,8 +298,6 @@ async def cmd_ratings_stats(message: Message):
 • Отрицательных: {negative} ({negative_pct:.1f}%) 👎
 
 """
-        
-        # Детализация по типам отзывов
         if stats.get('feedback_types'):
             text += "<b>Причины плохих оценок:</b>\n"
             for feedback_type, count in stats['feedback_types'].items():
@@ -400,7 +307,6 @@ async def cmd_ratings_stats(message: Message):
                     'bad_incorrect': '📊',
                     'bad': '👎'
                 }.get(feedback_type, '•')
-                
                 type_name = {
                     'bad_no_info': 'Нет нужной информации',
                     'bad_unclear': 'Ответ непонятен',
@@ -408,156 +314,128 @@ async def cmd_ratings_stats(message: Message):
                     'bad': 'Не указана причина',
                     'good': 'Положительные'
                 }.get(feedback_type, feedback_type)
-                
                 text += f"{emoji} {type_name}: {count}\n"
-        
         await message.answer(text, parse_mode="HTML")
-        
     except Exception as e:
         logger.error(f"Ошибка получения статистики рейтингов: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении статистики")
 
 
 @router.message(Command("bad_rated"))
+@require_role("admin")
 async def cmd_low_rated_messages(message: Message):
-    """
-    Список сообщений с плохими оценками
-    Команда: /bad_rated [limit]
-    """
-    if not is_admin(message.from_user.id):
-        return
-    
+    """Список сообщений с плохими оценками"""
     try:
-        # Получить лимит из команды (по умолчанию 10)
         args = message.text.split()
         limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 10
-        
-        # Получить низко оценённые сообщения
         messages_list = await get_low_rated_messages(limit=limit)
-        
         if not messages_list:
             await message.answer("✅ Нет плохо оценённых сообщений")
             return
-        
         text = f"👎 <b>Последние {len(messages_list)} плохо оценённых ответов:</b>\n\n"
-        
         for idx, msg in enumerate(messages_list, 1):
-            user_q = (msg['user_question'] or 'N/A')[:100]
-            bot_ans = (msg['bot_response'] or 'N/A')[:100]
+            import html
+            user_q = html.escape(str(msg.get('user_question') or 'N/A')[:100])
+            bot_ans = html.escape(str(msg.get('bot_response') or 'N/A')[:100])
             rating = msg['rating']
             feedback_type = msg['feedback_type'] or 'не указано'
-            comment = msg['comment'] or ''
-            date = msg['created_at'][:16] if msg['created_at'] else 'N/A'
-            
+            comment = html.escape(str(msg.get('comment') or ''))
+            date = html.escape(str(msg.get('created_at', 'N/A'))[:16])
             text += f"<b>{idx}.</b> Рейтинг: {rating}⭐\n"
             text += f"   Дата: {date}\n"
             text += f"   Вопрос: {user_q}...\n"
             text += f"   Ответ: {bot_ans}...\n"
-            
             if comment:
                 text += f"   💬 Причина: {comment}\n"
-            
             text += "\n"
-            
-            # Telegram ограничение на длину сообщения
             if len(text) > 3500:
                 await message.answer(text, parse_mode="HTML")
                 text = ""
-        
         if text:
             await message.answer(text, parse_mode="HTML")
-        
     except Exception as e:
         logger.error(f"Ошибка получения плохо оценённых сообщений: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении данных")
 
 
 @router.message(Command("rating_export"))
+@require_role("admin")
 async def cmd_export_ratings(message: Message):
-    """
-    Экспорт всех рейтингов в CSV
-    Команда: /rating_export
-    """
-    if not is_admin(message.from_user.id):
-        return
-    
+    """Экспорт всех рейтингов в CSV"""
     try:
-        import io
-        import csv
+        import io, csv
         from datetime import datetime
-        
-        # Получаем все плохо оценённые сообщения
-        messages_list = await get_low_rated_messages(limit=1000)
-        
+        messages_list = await get_low_rated_messages(limit=1000)  # экспорт последних 1000
         if not messages_list:
-            await message.answer("Нет данных для экспорта")
+            await message.answer("❌ Нет данных для экспорта")
             return
-        
-        # Создаём CSV
         output = io.StringIO()
         writer = csv.writer(output)
-        
-        # Заголовки
-        writer.writerow([
-            'ID', 'User ID', 'Rating', 'Feedback Type', 'Comment',
-            'User Question', 'Bot Response', 'Date'
-        ])
-        
-        # Данные
+        writer.writerow(["id", "user_question", "bot_response", "rating", "feedback_type", "comment", "date"])
         for msg in messages_list:
             writer.writerow([
-                msg['id'],
-                msg['user_id'],
-                msg['rating'],
-                msg['feedback_type'] or '',
-                msg['comment'] or '',
-                msg['user_question'] or '',
-                msg['bot_response'] or '',
-                msg['created_at'] or ''
+                msg.get("id"),
+                msg.get("user_question"),
+                msg.get("bot_response"),
+                msg.get("rating"),
+                msg.get("feedback_type"),
+                msg.get("comment"),
+                msg.get("created_at")
             ])
-        
-        # Отправляем файл
-        csv_data = output.getvalue()
-        csv_bytes = io.BytesIO(csv_data.encode('utf-8-sig'))  # UTF-8 with BOM для Excel
-        csv_bytes.name = f"ratings_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        
+        output.seek(0)
         from aiogram.types import BufferedInputFile
-        document = BufferedInputFile(csv_bytes.read(), filename=csv_bytes.name)
-        
-        await message.answer_document(
-            document=document,
-            caption=f"📊 Экспорт рейтингов ({len(messages_list)} записей)"
-        )
-        
-        logger.info(f"Экспорт рейтингов выполнен админом {message.from_user.id}")
-        
+        filename = f"low_rated_messages_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+        file = BufferedInputFile(output.read().encode("utf-8-sig"), filename=filename)
+        await message.answer_document(file, caption="📤 Экспорт низко оценённых сообщений")
     except Exception as e:
         logger.error(f"Ошибка экспорта рейтингов: {e}", exc_info=True)
-        await message.answer("❌ Ошибка при экспорте данных")
+        await message.answer("❌ Ошибка при экспорте")
 
 
-@router.message(Command("rating_notify"))
-async def cmd_rating_notifications(message: Message):
-    """
-    Настройка уведомлений о плохих оценках
-    Команда: /rating_notify [on/off]
+# ========== ОБРАБОТЧИКИ КНОПОК ==========
+
+@router.message(F.text == "📊 Статистика")
+@require_role("admin")
+async def handle_stats_button(message: Message):
+    await cmd_full_stats(message)
+
+@router.message(F.text == "📈 Аналитика")
+@require_role("admin")
+async def handle_analytics_button(message: Message):
+    await cmd_analytics(message)
+
+@router.message(F.text == "🔥 Популярные")
+@require_role("admin")
+async def handle_popular_button(message: Message):
+    await cmd_popular_questions(message)
+
+@router.message(F.text == "❌ Без ответов")
+@require_role("admin")
+async def handle_unanswered_button(message: Message):
+    await cmd_unanswered_questions(message)
+
+@router.message(F.text == "👥 Пользователи")
+@require_role("admin")
+async def handle_users_button(message: Message):
+    await cmd_recent_users(message)
+
+@router.message(F.text == "📥 Экспорт")
+@require_role("admin")
+async def handle_export_button(message: Message):
+    await cmd_export_data(message)
     
-    TODO: Реализовать сохранение настроек в БД
-    Пока просто показываем текущий статус
-    """
-    if not is_admin(message.from_user.id):
-        return
-    
-    await message.answer("""⚙️ <b>Настройка уведомлений о рейтингах</b>
+@router.message(F.text == "📤 Экспорт рейтингов")
+@require_role("admin")
+async def handle_export_ratings_button(message: Message):
+    await cmd_export_ratings(message)
 
-    <i>Функция в разработке</i>
+@router.message(F.text == "🔄 Reload KB")
+@require_role("admin")
+async def handle_reload_button(message: Message):
+    await cmd_reload_knowledge_base(message)
 
-    Планируется:
-    • Автоматические уведомления при оценке ≤2⭐
-    • Еженедельная сводка по рейтингам
-    • Настройка порога уведомлений
-
-    Используйте команды:
-    /ratings - статистика
-    /bad_rated - список плохих оценок
-    /rating_export - экспорт в CSV""", parse_mode="HTML")
+@router.message(F.text == "🔙 Главное меню")
+@require_role("admin")
+async def handle_back_button(message: Message):
+    from bot.keyboards import get_main_keyboard
+    await message.answer("Вы вернулись в главное меню", reply_markup=get_main_keyboard())

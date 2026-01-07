@@ -167,9 +167,9 @@ async def process_user_question(message: Message, show_progress: bool = True):
         
         # ЭТАП 5: Отправить финальный ответ пользователю
         
+        # Send AI answer as plain text to avoid accidental Markdown parsing
         bot_message = await message.answer(
         answer,
-        parse_mode="Markdown",
         reply_markup=get_main_keyboard()
         )
         # Добавить кнопки рейтинга (отдельное сообщение)
@@ -185,8 +185,8 @@ async def process_user_question(message: Message, show_progress: bool = True):
         )
         # Дополнительная информация для отладки (только для админов)
         if user_id in config.bot.admin_ids and config.debug:
-            debug_info = f"\n\n_🔍 Debug: Найдено источников: {len(sources_used)}, В БД: {found_in_db}_"
-            await message.answer(debug_info, parse_mode="Markdown")
+            debug_info = f"\n\n🔍 Debug: Найдено источников: {len(sources_used)}, В БД: {found_in_db}"
+            await message.answer(debug_info)
         
         logger.info(
             f"Ответ отправлен пользователю {user_id}. "
@@ -221,7 +221,7 @@ async def process_user_question(message: Message, show_progress: bool = True):
 
 Мы работаем над устранением проблемы."""
         
-        await message.answer(error_message, parse_mode="Markdown")
+        await message.answer(error_message)
 
 
 async def keep_typing(chat_id: int):
@@ -253,10 +253,70 @@ async def keep_typing(chat_id: int):
 async def handle_category_buttons(message: Message):
     """
     Обработчик кнопок категорий
-    Все вопросы обрабатываются через AI для естественных ответов
-    С показом прогресса (т.к. это быстрые кнопки)
+    Явное сопоставление кнопок с категориями FAQ
     """
-    await process_user_question(message, show_progress=True)
+    # Карта: текст кнопки → категория в FAQ
+    category_map = {
+        "📚 Документы": "Документы",
+        "💰 Стоимость": "Стоимость",
+        "🎓 Бюджет": "Бюджет",
+        "🏠 Общежитие": "Общежитие",
+        "📝 Без ЕГЭ": "Без ЕГЭ",
+        "🏫 Формы обучения": "Обучение"
+    }
+    
+    button_text = message.text
+    category = category_map.get(button_text)
+    
+    if not category:
+        # Если категория не найдена - обрабатываем как обычный вопрос
+        await process_user_question(message, show_progress=True)
+        return
+    
+    try:
+        # Прогресс
+        progress_msg = await message.answer("⏳ Ищу информацию...")
+        
+        # Получаем ответ из FAQ по категории
+        from database.crud import get_faq_answer_by_category
+        
+        faq_result = await get_faq_answer_by_category(category)
+        
+        if faq_result:
+            # Извлекаем текст ответа из словаря
+            faq_answer = faq_result.get('answer') if isinstance(faq_result, dict) else faq_result
+            
+            await progress_msg.delete()
+            
+            # Отправляем ответ
+            sent_message = await message.answer(faq_answer)
+            
+            # Показываем клавиатуру рейтинга
+            await message.answer(
+                "💭 Был ли ответ полезен?",
+                reply_markup=get_rating_keyboard(sent_message.message_id)
+            )
+            
+            # Сохраняем в историю
+            from database.crud import save_chat_message
+            await save_chat_message(
+                user_id=message.from_user.id,
+                user_name=message.from_user.full_name, 
+                message=button_text,  
+                bot_response=faq_answer,
+                source='telegram',
+                found_in_db=True
+            )
+
+        else:
+            # Если в FAQ нет - используем AI
+            await progress_msg.delete()
+            await process_user_question(message, show_progress=False)
+            
+    except Exception as e:
+        logger.error(f"Ошибка обработки кнопки категории: {e}")
+        await message.answer("❌ Произошла ошибка. Попробуйте еще раз.")
+
 
 
 # ========== ОБРАБОТЧИК ПРОИЗВОЛЬНОГО ТЕКСТА ==========
@@ -268,8 +328,57 @@ async def handle_text_message(message: Message):
     Главный обработчик вопросов пользователей
     С показом прогресса для длинных запросов
     """
+    # ========== ПРОВЕРКА ПАРОЛЯ МОДЕРАТОРА/АДМИНА ==========
+    from utils.auth_system import is_waiting_for_password, check_password
+    
+    if is_waiting_for_password(message.from_user.id):
+        password = message.text.strip()
+        role = check_password(message.from_user.id, password)
+        
+        if role:
+            await message.answer(
+                f"✅ <b>Авторизация успешна!</b>\n\n"
+                f"Вы вошли как: <b>{role}</b>"
+            )
+            
+            logger.info(f"Пользователь {message.from_user.id} авторизован как {role}, показываю панель...")
+            
+            # Показать соответствующую панель
+            try:
+                if role == 'admin':
+                    from bot.handlers.admin import cmd_admin_panel
+                    logger.info("Вызываю cmd_admin_panel...")
+                    await cmd_admin_panel(message)
+                elif role == 'moderator':
+                    from bot.handlers.moderator import show_moderator_panel
+                    logger.info("Вызываю show_moderator_panel...")
+                    await show_moderator_panel(message)
+                    logger.info("show_moderator_panel выполнена успешно")
+            except Exception as e:
+                logger.error(f"Ошибка при показе панели {role}: {e}", exc_info=True)
+                await message.answer(f"❌ Ошибка при загрузке панели: {e}")
+        else:
+            await message.answer(
+                "❌ <b>Неверный пароль!</b>\n\n"
+                "Попробуйте еще раз или используйте команду для повтора:\n"
+                "• /admin - для входа как админ\n"
+                "• /moderator - для входа как модератор"
+            )
+        
+        return  # ВАЖНО: Выходим, не обрабатываем как обычный вопрос
+    # =========================================================
+    
     # Игнорировать команды (они обрабатываются отдельно)
     if message.text.startswith('/'):
+        return
+    
+    # Игнорировать админ кнопки (пусть admin.py обработает)
+    admin_buttons = [
+        '📊 Статистика', '📈 Аналитика', '🔥 Популярные',
+        '❌ Без ответов', '👥 Пользователи', '📥 Экспорт',
+        '🔄 Reload KB', '🔙 Главное меню'
+    ]
+    if message.text in admin_buttons:
         return
     
     # Показываем прогресс для всех текстовых вопросов

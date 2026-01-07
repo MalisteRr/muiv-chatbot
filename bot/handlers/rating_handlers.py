@@ -10,7 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 # Предполагаем что эти функции будут добавлены в crud.py
 # Пока импортируем из отдельного файла
-from database.crud_ratings import save_rating, get_rating_statistics
+from database.crud import save_rating, get_rating_statistics
 
 logger = logging.getLogger(__name__)
 router = Router(name='rating')
