@@ -63,7 +63,8 @@ def get_admin_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="👥 Пользователи"),
-                KeyboardButton(text="📥 Экспорт")
+                KeyboardButton(text="📥 Экспорт"),
+                KeyboardButton(text="📤 Экспорт рейтингов")
             ],
             [
                 KeyboardButton(text="🔄 Reload KB"),
@@ -75,6 +76,33 @@ def get_admin_keyboard() -> ReplyKeyboardMarkup:
     )
     return keyboard
 
+def get_moderator_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Клавиатура для модераторов
+    Быстрый доступ к модератор-функциям
+    """
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📊 Статистика"),
+                KeyboardButton(text="⭐ Рейтинги")
+            ],
+            [
+                KeyboardButton(text="❓ Популярные"),
+                KeyboardButton(text="👎 Низкие оценки")
+            ],
+            [
+                KeyboardButton(text="📥 Экспорт"),
+                KeyboardButton(text="🔙 Главное меню")
+            ],
+            [
+                KeyboardButton(text="🚪 Выйти из модератора")
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
 
 def get_categories_inline() -> InlineKeyboardMarkup:
     """
