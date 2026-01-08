@@ -202,9 +202,9 @@ async def search_faq_by_keywords(keywords: List[str], limit: int = FAQ_SEARCH_LI
                 for row in rows:
                     result = {
                         'id': row[0],
-                        'question': row[0],
-                        'answer': row[1],
-                        'category': row[2]
+                        'question': row[1],
+                        'answer': row[2],
+                        'category': row[3]
                     }
                     # Избегаем дубликатов
                     if result not in results:
@@ -259,6 +259,148 @@ async def get_faq_by_category(category: str, limit: int = 10) -> List[Dict]:
     except Exception as e:
         logger.error(f"Ошибка получения FAQ по категории: {e}")
         return []
+
+
+async def get_faq_answer_by_category(category: str, question_text: str = "") -> Optional[Dict]:
+    """
+    Получить ОДИН ответ FAQ по категории (для RuBERT классификатора)
+    С УМНЫМ ПОИСКОМ по ключевым словам вопроса
+    
+    Args:
+        category: Название категории из RuBERT
+        question_text: Текст вопроса пользователя (для умного поиска)
+        
+    Returns:
+        dict с полями 'question', 'answer', 'category' или None
+    """
+    db = get_sqlite()
+    if not db:
+        logger.error("SQLite не подключен!")
+        return None
+    
+    try:
+        # Маппинг категорий RuBERT → категории в БД
+        category_mapping = {
+            'Документы': ['Документы', 'Поступление'],
+            'Поступление': ['Поступление', 'Документы'],
+            'Стоимость': ['Стоимость', 'Оплата'],
+            'Бюджет': ['Бюджет', 'Стипендия'],
+            'Общежитие': ['Общежитие'],
+            'Без ЕГЭ': ['Без ЕГЭ', 'Поступление'],
+            'Формы обучения': ['Формы обучения', 'Обучение'],
+            'Обучение': ['Обучение', 'Программы'],
+            'Оплата': ['Оплата', 'Стоимость'],
+            'Контакты': ['Контакты'],
+            'Программы': ['Программы', 'Обучение'],
+            'Карьера': ['Карьера'],
+            'Перевод': ['Перевод'],
+            'Стипендия': ['Стипендия', 'Бюджет']
+        }
+        
+        db_categories = category_mapping.get(category, [category])
+        question_lower = question_text.lower()
+        
+        # ========== УМНЫЙ ПОИСК (приоритет конкретным FAQ) ==========
+        # Если вопрос содержит конкретное направление
+        direction_keywords = {
+            'IT': ['it', 'айти', 'программирование', 'программиров', 'информатика', 'разработк'],
+            'Экономика': ['экономи', 'эконом'],
+            'Юриспруденция': ['юрис', 'право', 'юридич'],
+            'Менеджмент': ['менедж', 'управлен'],
+            'Психология': ['психолог']
+        }
+        
+        detected_direction = None
+        for direction, keywords in direction_keywords.items():
+            if any(kw in question_lower for kw in keywords):
+                detected_direction = direction
+                break
+        
+        # Если обнаружено направление - ищем конкретный FAQ
+        if detected_direction:
+            for db_cat in db_categories:
+                async with db.execute("""
+                    SELECT id, question, answer, category, keywords
+                    FROM faq 
+                    WHERE is_active = 1 AND category = ?
+                    ORDER BY priority DESC, created_at DESC
+                """, (db_cat,)) as cursor:
+                    rows = await cursor.fetchall()
+                    
+                    # Ищем FAQ который содержит направление в вопросе или keywords
+                    for row in rows:
+                        faq_question = row[1].lower()
+                        faq_keywords_str = row[4] if row[4] else "[]"
+                        
+                        try:
+                            faq_keywords = json.loads(faq_keywords_str)
+                            faq_keywords_lower = [k.lower() for k in faq_keywords]
+                        except:
+                            faq_keywords_lower = []
+                        
+                        # Проверяем совпадение направления
+                        for kw in direction_keywords[detected_direction]:
+                            if kw in faq_question or kw in ' '.join(faq_keywords_lower):
+                                logger.info(
+                                    f"✅ FAQ найден для категории '{category}' + направление '{detected_direction}' "
+                                    f"(ID: {row[0]})"
+                                )
+                                return {
+                                    'id': row[0],
+                                    'question': row[1],
+                                    'answer': row[2],
+                                    'category': row[3]
+                                }
+        
+        # ========== ОБЫЧНЫЙ ПОИСК (если направление не найдено) ==========
+        # Пробует найти ТОЧНОЕ совпадение
+        for db_cat in db_categories:
+            async with db.execute("""
+                SELECT id, question, answer, category
+                FROM faq 
+                WHERE is_active = 1 AND category = ?
+                ORDER BY priority DESC, created_at DESC
+                LIMIT 1
+            """, (db_cat,)) as cursor:
+                row = await cursor.fetchone()
+                
+                if row:
+                    logger.info(f"✅ FAQ найден для категории '{category}' → '{db_cat}' (общий)")
+                    return {
+                        'id': row[0],
+                        'question': row[1],
+                        'answer': row[2],
+                        'category': row[3]
+                    }
+        
+        # Если точного совпадения нет, пробует LIKE
+        for db_cat in db_categories:
+            pattern = f"%{db_cat}%"
+            
+            async with db.execute("""
+                SELECT id, question, answer, category
+                FROM faq 
+                WHERE is_active = 1 AND category LIKE ?
+                ORDER BY priority DESC, created_at DESC
+                LIMIT 1
+            """, (pattern,)) as cursor:
+                row = await cursor.fetchone()
+                
+                if row:
+                    logger.info(f"✅ FAQ найден для категории '{category}' → '{db_cat}' (LIKE)")
+                    return {
+                        'id': row[0],
+                        'question': row[1],
+                        'answer': row[2],
+                        'category': row[3]
+                    }
+        
+        logger.debug(f"FAQ для категории '{category}' не найден в БД")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Ошибка поиска FAQ по категории для RuBERT: {e}", exc_info=True)
+        return None
 
 
 async def add_faq(
@@ -371,6 +513,14 @@ async def save_chat_message(
     db = get_sqlite()
     if not db:
         return False
+    
+    # ✅ ИСПРАВЛЕНИЕ: Убедиться что пользователь существует в БД
+    # Это предотвращает ошибку FOREIGN KEY constraint failed
+    await db.execute("""
+        INSERT OR IGNORE INTO users (user_id, username, first_name, last_name, role, created_at)
+        VALUES (?, ?, NULL, NULL, 'user', CURRENT_TIMESTAMP)
+    """, (user_id, user_name))
+    await db.commit()
     
     try:
         await db.execute("""
@@ -588,12 +738,13 @@ async def get_total_stats() -> Dict:
 
 # ==================== ПОПУЛЯРНЫЕ ВОПРОСЫ ====================
 
-async def get_popular_questions(limit: int = 10) -> List[Dict]:
+async def get_popular_questions(limit: int = 10, days: int = 30) -> List[Dict]:
     """
     Получить популярные вопросы
     
     Args:
         limit: Количество вопросов
+        days: За сколько дней
         
     Returns:
         Список популярных вопросов
@@ -603,6 +754,8 @@ async def get_popular_questions(limit: int = 10) -> List[Dict]:
         return []
     
     try:
+        date_from = datetime.now() - timedelta(days=days)
+        
         async with db.execute("""
             SELECT 
                 a.question_text as question,
@@ -610,10 +763,11 @@ async def get_popular_questions(limit: int = 10) -> List[Dict]:
                 'общий' as category
             FROM analytics a
             WHERE a.question_text IS NOT NULL
+                AND a.timestamp >= ?
             GROUP BY a.question_text
             ORDER BY count DESC
             LIMIT ?
-        """, (limit,)) as cursor:
+        """, (date_from, limit)) as cursor:
             rows = await cursor.fetchall()
             
             return [

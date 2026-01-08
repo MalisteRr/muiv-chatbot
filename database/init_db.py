@@ -463,3 +463,73 @@ def get_sqlite() -> Optional[aiosqlite.Connection]:
 def get_db_type() -> str:
     """Получить тип БД"""
     return db_type
+
+
+async def load_faq_from_json(json_path: str, force_reload: bool = True) -> int:
+    """
+    Загрузить FAQ из JSON файла в БД
+    
+    Args:
+        json_path: Путь к JSON файлу
+        force_reload: Если True, очистить таблицу перед загрузкой
+        
+    Returns:
+        Количество загруженных записей
+    """
+    import json
+    
+    logger.info(f"📥 Загрузка FAQ из {json_path}...")
+    
+    # Читаем JSON
+    with open(json_path, "r", encoding="utf-8") as f:
+        faq_data = json.load(f)
+    
+    count = len(faq_data)
+    logger.info(f"   Найдено {count} вопросов в файле")
+    
+    if db_type == "sqlite":
+        if force_reload:
+            logger.info("   🔄 Очистка таблицы FAQ...")
+            await sqlite_conn.execute("DELETE FROM faq")
+        
+        # Вставка данных
+        for item in faq_data:
+            keywords_str = ",".join(item.get("keywords", [])) if isinstance(item.get("keywords"), list) else item.get("keywords", "")
+            
+            await sqlite_conn.execute("""
+                INSERT INTO faq (question, answer, category, keywords, priority, is_active)
+                VALUES (?, ?, ?, ?, ?, 1)
+            """, (
+                item.get("question", ""),
+                item.get("answer", ""),
+                item.get("category", ""),
+                keywords_str,
+                item.get("priority", 5)
+            ))
+        
+        await sqlite_conn.commit()
+        
+    elif db_type == "postgresql":
+        async with db_pool.acquire() as conn:
+            if force_reload:
+                logger.info("   🔄 Очистка таблицы FAQ...")
+                await conn.execute("DELETE FROM faq")
+            
+            # Вставка данных
+            for item in faq_data:
+                keywords_list = item.get("keywords", []) if isinstance(item.get("keywords"), list) else []
+                
+                await conn.execute("""
+                    INSERT INTO faq (question, answer, category, keywords, priority, is_active)
+                    VALUES ($1, $2, $3, $4, $5, TRUE)
+                """, 
+                    item.get("question", ""),
+                    item.get("answer", ""),
+                    item.get("category", ""),
+                    keywords_list,
+                    item.get("priority", 5)
+                )
+    
+    logger.info(f"✅ Загружено {count} записей FAQ")
+    return count
+
