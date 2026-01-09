@@ -12,6 +12,7 @@ from config import config
 def is_admin(user_id: int) -> bool:
     """
     Проверить, является ли пользователь администратором
+    ОБНОВЛЕНО: Теперь поддерживает систему авторизации
     
     Args:
         user_id: ID пользователя
@@ -19,7 +20,17 @@ def is_admin(user_id: int) -> bool:
     Returns:
         True если администратор
     """
-    return user_id in config.bot.admin_ids
+    # Проверяем по ID (старый способ для совместимости)
+    if user_id in config.bot.admin_ids:
+        return True
+    
+    # Проверяем по системе авторизации с паролями
+    try:
+        from utils.auth_system import has_role
+        return has_role(user_id, 'admin')
+    except ImportError:
+        # Если auth_system не установлен, используем старый способ
+        return user_id in config.bot.admin_ids
 
 
 def format_user_info(user_data: dict) -> str:
