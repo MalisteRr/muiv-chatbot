@@ -1,5 +1,5 @@
 """
-Собственный LSTM классификатор
+Собственный LSTM классификатор с Self-Attention
 Разработано для ВКР: Синицин М.Д.
 
 Интеграция с существующей системой muiv-chatbot
@@ -46,6 +46,7 @@ class ModelConfig:
     dropout: float = 0.4
     bidirectional: bool = True
     max_seq_length: int = 64
+    attention_heads: int = 4
     
     def save(self, path: str):
         with open(path, 'w', encoding='utf-8') as f:
@@ -94,10 +95,49 @@ class TextTokenizer:
         return tok
 
 
+# ================== SELF-ATTENTION ==================
+
+class SelfAttention(nn.Module):
+    """Multi-Head Self-Attention механизм"""
+    
+    def __init__(self, hidden_size: int, num_heads: int = 4, dropout: float = 0.1):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        self.scale = self.head_dim ** -0.5
+        
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+        self.out = nn.Linear(hidden_size, hidden_size)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x, mask=None):
+        B, L, H = x.shape
+        
+        q = self.query(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.key(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.value(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        
+        if mask is not None:
+            mask = mask.unsqueeze(1).unsqueeze(2)
+            scores = scores.masked_fill(mask == 0, -1e9)
+        
+        attn = torch.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+        
+        out = torch.matmul(attn, v)
+        out = out.transpose(1, 2).contiguous().view(B, L, H)
+        
+        return self.out(out)
+
+
 # ================== MODEL ==================
 
 class LSTMClassifier(nn.Module):
-    """Базовый BiLSTM классификатор"""
+    """LSTM классификатор с Self-Attention"""
     
     def __init__(self, config: ModelConfig, pretrained_embeddings=None):
         super().__init__()
@@ -118,21 +158,33 @@ class LSTMClassifier(nn.Module):
         
         lstm_output_size = config.hidden_size * (2 if config.bidirectional else 1)
         
+        self.attention = SelfAttention(lstm_output_size, config.attention_heads, config.dropout)
+        self.layer_norm = nn.LayerNorm(lstm_output_size)
+        
         self.classifier = nn.Sequential(
-            nn.Linear(lstm_output_size, 128),
+            nn.Linear(lstm_output_size, 256),
             nn.ReLU(),
             nn.Dropout(config.dropout),
-            nn.Linear(128, config.num_classes)
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(config.dropout / 2),
+            nn.Linear(64, config.num_classes)
         )
     
     def forward(self, input_ids, attention_mask=None):
         x = self.embedding(input_ids)
         lstm_out, _ = self.lstm(x)
         
+        attn_out = self.attention(lstm_out, attention_mask)
+        x = self.layer_norm(lstm_out + attn_out)
+        
         if attention_mask is not None:
             mask = attention_mask.unsqueeze(-1)
-            x = (lstm_out * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            x = (x * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
         else:
-            x = lstm_out.mean(dim=1)
+            x = x.mean(dim=1)
         
         return self.classifier(x)
