@@ -8,8 +8,9 @@
 
 import logging
 import json
+import numpy as np
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, asdict
 
 import torch
@@ -95,7 +96,7 @@ class TextTokenizer:
         return tok
 
 
-# ================== SELF-ATTENTION ==================
+# ================== MODEL ==================
 
 class SelfAttention(nn.Module):
     """Multi-Head Self-Attention механизм"""
@@ -134,8 +135,6 @@ class SelfAttention(nn.Module):
         return self.out(out)
 
 
-# ================== MODEL ==================
-
 class LSTMClassifier(nn.Module):
     """LSTM классификатор с Self-Attention"""
     
@@ -172,7 +171,8 @@ class LSTMClassifier(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.dropout / 2),
             nn.Linear(64, config.num_classes)
-        )
+)
+
     
     def forward(self, input_ids, attention_mask=None):
         x = self.embedding(input_ids)
@@ -188,3 +188,169 @@ class LSTMClassifier(nn.Module):
             x = x.mean(dim=1)
         
         return self.classifier(x)
+
+
+# ================== CLASSIFIER WRAPPER ==================
+
+class CustomIntentClassifier:
+    """
+    Обёртка над LSTM классификатором для совместимости с RuBERT интерфейсом
+    """
+    
+    def __init__(self, model_path: str, confidence_threshold: float = 0.7):
+        """
+        Инициализация классификатора
+        
+        Args:
+            model_path: Путь к папке с моделью (classifier.pt, tokenizer.json, config.json)
+            confidence_threshold: Порог уверенности (0-1)
+        """
+        self.model_path = Path(model_path)
+        self.confidence_threshold = confidence_threshold
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        self.id2label = ID2LABEL
+        self.label2id = CATEGORY_MAPPING
+        
+        self._load_model()
+    
+    def _load_model(self):
+        """Загрузка модели и токенизатора"""
+        try:
+            logger.info(f"🧠 Загрузка собственной LSTM модели из {self.model_path}")
+            
+            # Загружаем токенизатор
+            tokenizer_path = self.model_path / "tokenizer.json"
+            self.tokenizer = TextTokenizer.load(str(tokenizer_path))
+            
+            # Загружаем конфиг
+            config_path = self.model_path / "config.json"
+            self.config = ModelConfig.load(str(config_path))
+            
+            # Загружаем модель
+            model_file = self.model_path / "classifier.pt"
+            checkpoint = torch.load(model_file, map_location=self.device)
+            
+            self.model = LSTMClassifier(self.config)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.to(self.device)
+            self.model.eval()
+            
+            logger.info(f"✅ Собственная LSTM модель загружена успешно!")
+            logger.info(f"   📋 Категорий: {len(self.id2label)}")
+            logger.info(f"   💻 Устройство: {self.device}")
+            logger.info(f"   🎯 Порог уверенности: {self.confidence_threshold}")
+            logger.info(f"   📊 Параметров: {sum(p.numel() for p in self.model.parameters()):,}")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки LSTM модели: {e}", exc_info=True)
+            raise
+    
+    def predict(self, text: str) -> Dict:
+        """
+        Предсказать категорию для текста
+        
+        Args:
+            text: Текст вопроса пользователя
+            
+        Returns:
+            dict: {
+                'category': str,           # Предсказанная категория
+                'confidence': float,       # Уверенность (0-1)
+                'is_confident': bool,      # Выше ли порога
+                'all_scores': dict         # Все категории с вероятностями
+            }
+        """
+        try:
+            # Токенизация
+            input_ids, attention_mask = self.tokenizer.encode(text)
+            input_ids = input_ids.unsqueeze(0).to(self.device)
+            attention_mask = attention_mask.unsqueeze(0).to(self.device)
+            
+            # Предсказание
+            with torch.no_grad():
+                logits = self.model(input_ids, attention_mask)
+                probabilities = torch.softmax(logits, dim=1)[0]
+            
+            # Получаем предсказанный класс
+            predicted_id = torch.argmax(probabilities).item()
+            confidence = probabilities[predicted_id].item()
+            predicted_category = self.id2label[predicted_id]
+            
+            # Все вероятности
+            all_scores = {
+                self.id2label[i]: probabilities[i].item()
+                for i in range(len(probabilities))
+            }
+            
+            result = {
+                'category': predicted_category,
+                'confidence': confidence,
+                'is_confident': confidence >= self.confidence_threshold,
+                'all_scores': all_scores
+            }
+            
+            logger.debug(
+                f"LSTM классификация: '{text[:50]}...' → {predicted_category} "
+                f"({confidence*100:.1f}%)"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Ошибка предсказания LSTM: {e}", exc_info=True)
+            return {
+                'category': None,
+                'confidence': 0.0,
+                'is_confident': False,
+                'all_scores': {}
+            }
+    
+    def get_top_categories(self, text: str, top_k: int = 3) -> list:
+        """
+        Получить топ-K наиболее вероятных категорий
+        """
+        prediction = self.predict(text)
+        sorted_scores = sorted(
+            prediction['all_scores'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return sorted_scores[:top_k]
+
+
+# ================== ГЛОБАЛЬНЫЕ ФУНКЦИИ ==================
+
+_custom_classifier_instance: Optional[CustomIntentClassifier] = None
+
+
+def init_custom_classifier(model_path: str, confidence_threshold: float = 0.7):
+    """
+    Инициализировать глобальный экземпляр собственного классификатора
+    
+    Args:
+        model_path: Путь к модели
+        confidence_threshold: Порог уверенности
+    """
+    global _custom_classifier_instance
+    
+    try:
+        _custom_classifier_instance = CustomIntentClassifier(model_path, confidence_threshold)
+        logger.info("✅ Собственный LSTM классификатор инициализирован")
+    except Exception as e:
+        logger.error(f"❌ Не удалось инициализировать LSTM классификатор: {e}")
+        _custom_classifier_instance = None
+
+
+def get_custom_classifier() -> Optional[CustomIntentClassifier]:
+    """
+    Получить глобальный экземпляр собственного классификатора
+    """
+    return _custom_classifier_instance
+
+
+def is_custom_classifier_available() -> bool:
+    """
+    Проверить доступен ли собственный классификатор
+    """
+    return _custom_classifier_instance is not None
