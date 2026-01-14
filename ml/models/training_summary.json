@@ -1,0 +1,16 @@
+{
+  "model": "DeepPavlov/rubert-base-cased",
+  "data_file": "final_dataset.json",
+  "total_examples": 4776,
+  "num_classes": 8,
+  "train_examples": 3342,
+  "val_examples": 478,
+  "test_examples": 956,
+  "epochs": 5,
+  "batch_size": 16,
+  "learning_rate": 2e-05,
+  "accuracy": 0.9748953974895398,
+  "f1_score": 0.9753074582516194,
+  "training_time": "0:01:45.141655",
+  "device": "cuda"
+}

@@ -1,0 +1,122 @@
+[
+  {
+    "question": "Оке, а индивидуальные достижения важны для платного обучения?",
+    "true_category": "Поступление",
+    "predicted_category": "Формы обучения"
+  },
+  {
+    "question": "Оке, а есть шанс на стипендию для платников?",
+    "true_category": "Поступление",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "А реально ли выбирать форму после поступления?",
+    "true_category": "Формы обучения",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "Слуш, а есть ли заменители ЕГЭ?",
+    "true_category": "Без ЕГЭ",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "Оке, после колледжа можно поступить без экзаменов?",
+    "true_category": "Поступление",
+    "predicted_category": "Без ЕГЭ"
+  },
+  {
+    "question": "Слуш, можно ли оформить перевод на бесплатное?",
+    "true_category": "Обучение",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Можно как-то перейти с платного на бесплатное обучение?",
+    "true_category": "Бюджет",
+    "predicted_category": "Обучение"
+  },
+  {
+    "question": "Короче, реально ли заочно сдать все экзамены без проблем?",
+    "true_category": "Формы обучения",
+    "predicted_category": "Без ЕГЭ"
+  },
+  {
+    "question": "Оке, после колледжа можно поступить без экзаменов?",
+    "true_category": "Поступление",
+    "predicted_category": "Без ЕГЭ"
+  },
+  {
+    "question": "Оке, реально ли узнать точную сумму стипендии?",
+    "true_category": "Бюджет",
+    "predicted_category": "Стоимость"
+  },
+  {
+    "question": "Надо, чтобы спланировать бюджет на учёбу.",
+    "true_category": "Стоимость",
+    "predicted_category": "Обучение"
+  },
+  {
+    "question": "Оке, а есть шанс на стипендию для платников?",
+    "true_category": "Поступление",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Оке, а есть пошаговая схема перевода на бюджет?",
+    "true_category": "Бюджет",
+    "predicted_category": "Обучение"
+  },
+  {
+    "question": "Чё, реально ли пересдать экзамены и попробовать снова?",
+    "true_category": "Поступление",
+    "predicted_category": "Без ЕГЭ"
+  },
+  {
+    "question": "Короче, реально ли нужно подавать заявку заранее?",
+    "true_category": "Общежитие",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "А реально ли выбирать форму после поступления?",
+    "true_category": "Формы обучения",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "Короче, платное + бюджет, реально ли так провернуть?",
+    "true_category": "Обучение",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Можно ли перевестись на бюджет с платного?",
+    "true_category": "Обучение",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Слуш, можно ли оформить перевод на бесплатное?",
+    "true_category": "Обучение",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Слуш, а можно по обмену свалить в зарубежный универ?",
+    "true_category": "Обучение",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "Чё, а можно ли податься на обмен в другой универ мира?",
+    "true_category": "Обучение",
+    "predicted_category": "Поступление"
+  },
+  {
+    "question": "Можно ли перевестись на бюджет с платного?",
+    "true_category": "Обучение",
+    "predicted_category": "Бюджет"
+  },
+  {
+    "question": "Короче, есть шанс попасть на бюджет с платного?",
+    "true_category": "Бюджет",
+    "predicted_category": "Обучение"
+  },
+  {
+    "question": "Оке, а есть ли ограничения для такого перевода?",
+    "true_category": "Обучение",
+    "predicted_category": "Поступление"
+  }
+]
