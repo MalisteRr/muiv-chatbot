@@ -87,4 +87,7 @@ docker-compose.override.yml
 
 # ========== Project Specific ==========
 # Оставляем только пример:
-!.env.example
+!.env.exampleml/models/final_model/model.safetensors
+ml/models/checkpoints/best_model.pt
+ml/models/checkpoints/checkpoint-*/model.safetensors
+ml/models/checkpoints/checkpoint-*/*.pt
