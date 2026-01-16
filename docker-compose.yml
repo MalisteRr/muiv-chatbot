@@ -1,12 +1,10 @@
 # Docker Compose для чат-бота МУИВ
 # 
-# ВАРИАНТ 1: Только бот с SQLite (простой)
-# docker-compose up bot-sqlite
+# ВАРИАНТ 1: Только бот с SQLite (простой, рекомендуется)
+# docker-compose --profile sqlite up -d
 #
 # ВАРИАНТ 2: Бот + PostgreSQL (полноценный)
-# docker-compose up
-
-version: '3.8'
+# docker-compose --profile postgres up -d
 
 services:
   # ===== ВАРИАНТ 1: Бот с SQLite =====
@@ -32,7 +30,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    # Убираем зависимость от PostgreSQL
     profiles:
       - sqlite
 
@@ -95,7 +92,11 @@ volumes:
 #
 # ВАРИАНТ 1: SQLite (рекомендуется для начала)
 # 
-# 1. Создать .env файл с вашими ключами
+# 1. Создать .env файл с ключами:
+#    TELEGRAM_BOT_TOKEN=your_token_here
+#    ADMIN_IDS=123456789
+#    OPENAI_API_KEY=your_openai_key
+# 
 # 2. Запустить:
 #    docker-compose --profile sqlite up -d
 # 
@@ -109,7 +110,9 @@ volumes:
 #
 # ВАРИАНТ 2: PostgreSQL (для продакшена)
 #
-# 1. Создать .env файл с вашими ключами
+# 1. Добавить в .env:
+#    POSTGRES_PASSWORD=secure_password_here
+#
 # 2. Запустить:
 #    docker-compose --profile postgres up -d
 #
@@ -126,11 +129,16 @@ volumes:
 # Пересобрать образ:
 # docker-compose build
 #
+# Перезапустить с новым кодом:
+# docker-compose --profile sqlite down
+# docker-compose build
+# docker-compose --profile sqlite up -d
+#
 # Подключиться к PostgreSQL:
 # docker exec -it muiv-postgres psql -U muiv_user -d muiv_bot
 #
-# Посмотреть все логи:
-# docker-compose logs
+# Посмотреть состояние:
+# docker-compose ps
 #
 # Удалить все данные:
 # docker-compose down -v
